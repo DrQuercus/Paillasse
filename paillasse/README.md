@@ -1,8 +1,8 @@
 # Paillasse
 
 Cahier de labo électronique auto-hébergé, inspiré de Benchling, pensé d'abord pour un usage
-individuel sur le serveur du labo. Cette version 0.1 couvre le socle, le cahier, le registre de séquences
-et les calculs de paillasse ; le registre de constructions et l'inventaire viendront ensuite.
+individuel sur le serveur du labo. Cette version 0.1 couvre le socle, le cahier, le registre de séquences,
+les calculs de paillasse et l'analyse de gels ; le registre de constructions et l'inventaire viendront ensuite.
 
 ## Ce que fait cette version
 
@@ -67,6 +67,37 @@ et les calculs de paillasse ; le registre de constructions et l'inventaire viend
 - **Produits** (onglet de la page Calculs) : 153 produits avec masse molaire, formule, solution mère et
   concentration d'usage, proposés pendant la saisie (sans tenir compte des accents). On en ajoute, on les
   corrige, on les archive. Corriger une masse molaire ne change pas les calculs déjà enregistrés.
+- **Analyse de gels** (menu « Gels », reprise et refonte de SDS-PAGE Analyzer) en trois modes :
+  **protéines** (SDS-PAGE : Coomassie, argent, stain-free), **western blot** (chimiluminescence, fluorescence)
+  et **ADN / ARN** (agarose : BET, SYBR, GelRed). Un atelier guidé en cinq étapes :
+  1. *Image* : TIFF 8 ou 16 bits (LZW, Deflate, PackBits, tuiles, flottants), PNG ou JPEG ; quarts de tour,
+     miroirs, redressement fin, rognage ; contraste, gamma et palette qui ne touchent jamais aux mesures ;
+     bandes sombres ou claires détectées seules ; densité optique pour un Coomassie en transmission.
+  2. *Pistes* : détection automatique (pistes vides ou à une seule bande comprises) et repérage du marqueur,
+     pistes inclinables, largeur commune, zone de migration, correction de courbure (« smile ») par des
+     lignes d'égale migration.
+  3. *Tailles* : 17 marqueurs du commerce (PageRuler, Precision Plus, NEB, GeneRuler, λ HindIII…) enregistrés
+     dans la base et modifiables ; attribution automatique des bandes du marqueur, corrigeable au clic ;
+     interpolation, régression linéaire ou polynôme sur log(taille), écart de chaque marqueur affiché.
+  4. *Bandes* : sensibilité réglable, fond rolling ball, vallée à vallée ou minimum, bandes ajoutées ou
+     retirées à la main ; tableau de toutes les pistes (bandes regroupées par taille, et nommables : GAPDH,
+     BSA…) en aire, % de la piste (pureté), % d'une piste de référence, normalisation par un contrôle de
+     charge, ou quantité (µg, ng) par une gamme étalon (pistes de BSA, ou masses des bandes du marqueur) ;
+     rapport molaire des bandes d'une piste ; bandes saturées signalées ; tailles attendues calculées depuis
+     le registre (masse de la protéine d'un CDS, fragments d'une PCR ou d'une digestion) et comparées aux
+     bandes observées.
+  5. *Figure* : le configurateur de l'encart. Gel sans pistes, avec lignes ou cadres, noms des pistes,
+     échelle de tailles, tailles des bandes, tailles attendues, flèches annotées, recadrage sur les pistes ;
+     profils de migration sur fond blanc (axe en tailles), tableau, courbe d'étalonnage, gamme étalon ;
+     disposition en colonne ou côte à côte, largeur dans la page. Téléchargement en PNG, SVG et CSV.
+  Annuler / rétablir (Ctrl+Z / Ctrl+Y) à chaque étape ; l'analyse en cours sur la page Gels est gardée dans le
+  navigateur et se reprend après un rechargement.
+- **Figure de gel dans une entrée** : bouton « Figure de gel » de la barre d'outils, « Analyser le gel » sur une
+  image déjà jointe, ou « Insérer dans une entrée » depuis la page Gels. L'image d'origine est jointe telle
+  quelle, les panneaux de la figure deviennent des images jointes qui en dérivent, et l'analyse complète
+  (réglages, pistes, étalonnage) est enregistrée dans l'encart. Le tableau et les notes restent du texte :
+  scellés avec la version, imprimés, exportés et trouvés par la recherche. « Modifier » rouvre l'atelier tant
+  que l'entrée est un brouillon ; une fois verrouillée, « Reprendre » rouvre l'analyse sur la page Gels.
 - **Modèles** de protocoles, créés à la main ou à partir d'une entrée.
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
@@ -176,6 +207,30 @@ Corrections par rapport à LabHelper v3 :
   utilisait le stockage des artefacts Claude) : les produits sont maintenant dans PostgreSQL, et l'historique
   est remplacé par les encarts insérés dans le cahier.
 
+## Gels : fiabilité
+
+Le moteur est dans `client/src/lib/gel/` (sans React) et `npm --prefix client test` le vérifie sur des gels
+synthétiques dont les quantités sont connues (proportions, normalisation d'un western, gamme de BSA,
+tailles après correction de courbure, pistes presque vides), et sur 12 TIFF de référence produits par
+Pillow (`client/test/make-tiff-fixtures.py` : 8, 16 et 32 bits, LZW, Deflate, PackBits, tuiles, prédicteur,
+palette, MinIsWhite, RGB).
+
+Les mesures se font toujours sur les intensités brutes de l'image préparée (orientée, redressée, rognée) :
+contraste, gamma, palette et inversion ne servent qu'à l'affichage et à la figure. Le serveur ne refait pas
+l'analyse : il vérifie que les images de l'encart sont des pièces jointes de l'entrée et affiche le tableau
+enregistré (`server/src/lib/gel.js`).
+
+Corrections par rapport à SDS-PAGE Analyzer :
+- le contraste et la luminosité étaient appliqués aux données avant la quantification (une bande de 17 %
+  mesurée à 5 % avec un contraste de 2) ;
+- les TIFF compressés en LZW donnaient une image brouillée sans message d'erreur (taille de code changée
+  une étape trop tard), et les TIFF Deflate étaient refusés ;
+- avec la correction de courbure, les bandes du marqueur étaient repérées sur l'image brute et les
+  échantillons sur l'image corrigée : les tailles n'étaient pas dans le même repère ;
+- une seule piste à la fois, pas d'alerte de saturation, rien d'enregistré, exports en captures d'écran ;
+  réglages de détection en pixels (ils dépendent maintenant de la hauteur du gel) ; rapport 1 : 1,5 jamais
+  simplifié en 2 : 3.
+
 ## Séquences : fiabilité
 
 Le lecteur SnapGene est propre à Paillasse : les bibliothèques JavaScript existantes perdaient les
@@ -214,7 +269,8 @@ server/
   src/lib/storage.js           stockage des fichiers par SHA-256
   src/lib/render.js            rendu HTML (impression, export)
   src/lib/calc.js              encart de calcul : vérification, rendu imprimable, texte de recherche
-  src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits
+  src/lib/gel.js               encart de figure de gel : vérification, rendu imprimable, texte de recherche
+  src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs
   scripts/create-user.js       créer un compte ou changer un mot de passe
 client/
   src/pages/EntryPage.jsx      édition d'une entrée : autosave, versions, verrou
@@ -222,6 +278,9 @@ client/
   src/lib/calc/                formules des calculs, unités, recettes de milieux (testés : npm test)
   src/components/calc/         formulaires, encart dans l'éditeur (LabCalcNode), produits
   src/pages/CalcPage.jsx       page Calculs
+  src/lib/gel/                 analyse de gel : TIFF, image, profils, étalonnage, quantification, figure (testés)
+  src/components/gel/          atelier en cinq étapes (GelWorkbench), encart dans l'éditeur (GelFigureNode)
+  src/pages/GelPage.jsx        page Gels (analyse libre, marqueurs)
 deploy/                        service systemd, sauvegarde et son timer
 ```
 
@@ -243,4 +302,9 @@ deploy/                        service systemd, sauvegarde et son timer
   de lectures Sanger (prévus ensuite). Digestion : sensibilité à la méthylation (dam/dcm) non signalée.
 - PCR virtuelle : pas de simulation des structures secondaires de la matrice ni des produits parasites
   dus à une hybridation partielle très en amont.
-- Les TIFF sont joints comme fichiers, pas affichés dans la page (seul Safari sait les afficher).
+- Les TIFF sont joints comme fichiers, pas affichés dans la page (seul Safari sait les afficher) ;
+  l'atelier Gels, lui, les lit et en fait une figure.
+- Gels : TIFF compressés en JPEG, BigTIFF et formats propriétaires des imageurs (`.scn`, `.1sc`) non lus
+  (exporter en TIFF non compressé ou LZW) ; seule la première page d'un TIFF multi-pages est lue. Pas de
+  dot blot ni de gel 2D. Tailles apparentes : un marqueur précoloré migre différemment selon le tampon
+  (Tris-glycine, MES, MOPS) : c'est rappelé dans l'onglet Marqueurs, pas corrigé.

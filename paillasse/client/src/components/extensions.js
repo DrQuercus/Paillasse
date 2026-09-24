@@ -10,6 +10,7 @@ import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import { SequenceRefNode } from './SequenceRef.jsx';
 import { LabCalcNode } from './calc/LabCalcNode.jsx';
+import { GelFigureNode } from './gel/GelFigureNode.jsx';
 
 export const IMAGE_SIZES = [25, 50, 75, 100];
 
@@ -74,5 +75,6 @@ export function buildExtensions({ placeholder } = {}) {
     TaskItem.configure({ nested: true }),
     SequenceRefNode,
     LabCalcNode,
+    GelFigureNode,
   ];
 }

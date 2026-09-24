@@ -383,6 +383,7 @@ export default function EntryPage({ id }) {
             editable={!locked}
             onChange={(json) => markDirty({ content: json })}
             onUpload={locked ? undefined : upload}
+            entryId={id}
             onReady={(ed) => { editorRef.current = ed; }}
           />
 

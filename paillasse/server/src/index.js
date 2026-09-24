@@ -17,6 +17,7 @@ import exportRoutes from './routes/export.js';
 import sequenceRoutes from './routes/sequences.js';
 import toolRoutes from './routes/tools.js';
 import reagentRoutes from './routes/reagents.js';
+import ladderRoutes from './routes/ladders.js';
 import { ownerBoard, sharedBoard } from './routes/board.js';
 
 if (config.sessionSecret.length < 32) {
@@ -46,6 +47,7 @@ api.use('/export', exportRoutes);
 api.use('/sequences', sequenceRoutes);
 api.use('/tools', toolRoutes);
 api.use('/reagents', reagentRoutes);
+api.use('/ladders', ladderRoutes);
 api.use('/', attachmentRoutes);
 api.use((_req, res) => res.status(404).json({ error: 'Route inconnue' }));
 app.use('/api', api);
