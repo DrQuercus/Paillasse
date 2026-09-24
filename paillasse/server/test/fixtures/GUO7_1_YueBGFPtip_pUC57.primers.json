@@ -1,0 +1,87 @@
+{
+ "params": {
+  "minContinuousMatchLen": "10",
+  "allowMismatch": "1",
+  "minMeltingTemperature": "40",
+  "showAdditionalFivePrimeMatches": "1",
+  "minimumFivePrimeAnnealing": "15"
+ },
+ "primers": [
+  {
+   "name": "YueB_TipAlphaTag_S",
+   "bases": "ATGGGAAGCAGTGGAAGCAGACTAGAAGAAGAGCTAAGACGCCGCCTAACAGAGAGAAGCGGAGAAGAGGGTACTCAA",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 3249,
+     "annealed": "AGAAGCGGAGAAGAGGGTACTCAA",
+     "tm": 60,
+     "components": [
+      {
+       "bases": "ATGGGAAGCAGTGGAAGCAGACTAGAAGAAGAGCTAAGACGCCGCCTAACAGAG",
+       "range": null
+      },
+      {
+       "bases": "AGAAGCGGAGAAGAGGGTACTCAA",
+       "range": "3226-3249"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "YueB_TipAlphaTag_AS",
+   "bases": "TACCGTTCGTATAATGTATGCTATACGAAG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2203,
+     "annealed": "TACCGTTCGTATAATGTATGCTATACGAAG",
+     "tm": 59,
+     "components": [
+      {
+       "bases": "TACCGTTCGTATAATGTATGCTATACGAAG",
+       "range": "2203-2232"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR09 Verif pos cassette pUC57",
+   "bases": "cctatcacctcaaatggttcgctg",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 2198,
+     "annealed": "cctatcacctcaaatggttcgctg",
+     "tm": 59,
+     "components": [
+      {
+       "bases": "cctatcacctcaaatggttcgctg",
+       "range": "2175-2198"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR10 Verif Pos cassette pUC57-R",
+   "bases": "GTTTTTGTCCCGTTTCAATGTTAGTTTGAAC",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 3271,
+     "annealed": "GTTTTTGTCCCGTTTCAATGTTAGTTTGAAc",
+     "tm": 60,
+     "components": [
+      {
+       "bases": "GTTTTTGTCCCGTTTCAATGTTAGTTTGAAC",
+       "range": "3271-3301"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

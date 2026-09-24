@@ -1,0 +1,91 @@
+{
+ "params": {
+  "minContinuousMatchLen": "10",
+  "allowMismatch": "1",
+  "minMeltingTemperature": "40",
+  "showAdditionalFivePrimeMatches": "1",
+  "minimumFivePrimeAnnealing": "15"
+ },
+ "primers": [
+  {
+   "name": "LR17_pos casette_DegU32_Up",
+   "bases": "GTCTCAAGAGAAATCCATGAC",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 329,
+     "annealed": "GTCTCAAGAGAAATCCATGAC",
+     "tm": 52,
+     "components": [
+      {
+       "bases": "GTCTCAAGAGAAATCCATGAC",
+       "range": "309-329"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR18_pos casette_DegU32_Down",
+   "bases": "GCTTTTTTACGTGTGCGAAT",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2393,
+     "annealed": "GCTTTTTTACGTGTGCGAAT",
+     "tm": 56,
+     "components": [
+      {
+       "bases": "GCTTTTTTACGTGTGCGAAT",
+       "range": "2393-2412"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR16_mutationDegU32",
+   "bases": "ATGATTAAGGTTCCGTTATCTCTTTGA",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 917,
+     "annealed": "ATGATTAAGGTTCCGTTATCTCTTTGA",
+     "tm": 54,
+     "components": [
+      {
+       "bases": "ATGATTAAGGTTCCGTTATCTCTTTGA",
+       "range": "891-917"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR19_DegU32(Hy)A35T_F",
+   "bases": "GTGACTAAAGTAAACATTGTTATTATCGACGACCTTCAG",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 1038,
+     "annealed": "GTGACTAAAGTAAACATTGTTATTATCGACGACCTCAG",
+     "tm": 60,
+     "components": [
+      {
+       "bases": "GTGACTAAAGTAAACATTGTTATTATCGACGACC",
+       "range": "1000-1033"
+      },
+      {
+       "bases": "T",
+       "range": null
+      },
+      {
+       "bases": "TCAG",
+       "range": "1035-1038"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,47 @@
+{
+ "params": {
+  "minContinuousMatchLen": "10",
+  "allowMismatch": "1",
+  "minMeltingTemperature": "40",
+  "showAdditionalFivePrimeMatches": "1",
+  "minimumFivePrimeAnnealing": "15"
+ },
+ "primers": [
+  {
+   "name": "LR1",
+   "bases": "AATTGGTTTTCTAAATATGATTTTTGTTCACCTGACAT",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 1414,
+     "annealed": "AATTGGTTTTCTAAATATGATTTTTGTTCACCTGACAT",
+     "tm": 60,
+     "components": [
+      {
+       "bases": "AATTGGTTTTCTAAATATGATTTTTGTTCACCTGACAT",
+       "range": "1414-1451"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR2",
+   "bases": "TTCGTGCTTGATTTCTCTTTGACATCTC",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 182,
+     "annealed": "TTCGTGCTTGATTTCTCTTTGACATCTC",
+     "tm": 60,
+     "components": [
+      {
+       "bases": "TTCGTGCTTGATTTCTCTTTGACATCTC",
+       "range": "155-182"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

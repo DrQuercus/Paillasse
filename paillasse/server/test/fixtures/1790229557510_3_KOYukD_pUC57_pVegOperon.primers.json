@@ -1,0 +1,137 @@
+{
+ "params": {
+  "minContinuousMatchLen": "10",
+  "allowMismatch": "1",
+  "minMeltingTemperature": "40",
+  "showAdditionalFivePrimeMatches": "1",
+  "minimumFivePrimeAnnealing": "15"
+ },
+ "primers": [
+  {
+   "name": "LR20_YukE_F",
+   "bases": "ATGGCAGGATTAATTCGTGTC",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 2356,
+     "annealed": "ATGGCAGGATTAATTCGTGTC",
+     "tm": 55,
+     "components": [
+      {
+       "bases": "ATGGCAGGATTAATTCGTGTC",
+       "range": "2336-2356"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR22_demipVeg_operon_S",
+   "bases": "GTACAATAAATGTGCGTAAGGAGGAACTCATATGGCAGGATTAATTCGTGTCACACCC",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 2362,
+     "annealed": "GTACAATAAATGTGCGTAAGGAGGAACTCATATGGCAGGATTAATTCGTGTCACACCC",
+     "tm": 70,
+     "components": [
+      {
+       "bases": "GTACAATAAATGTGCGTAAGGAGGAACTCATATGGCAGGATTAATTCGTGTCACACCC",
+       "range": "2305-2362"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR23_demipVeg_overlap_operon_S",
+   "bases": "AAATGGGCTCGTGTTGTACAATAAATGTGCGTAAGGAGGAACTCATATGGCAGGATTAATTCGTGTCACACCC",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 2362,
+     "annealed": "AAATGGGCTCGTGTTGTACAATAAATGTGCGTAAGGAGGAACTCATATGGCAGGATTAATTCGTGTCACACCC",
+     "tm": 73,
+     "components": [
+      {
+       "bases": "AAATGGGCTCGTGTTGTACAATAAATGTGCGTAAGGAGGAACTCATATGGCAGGATTAATTCGTGTCACACCC",
+       "range": "2290-2362"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR24_rm_Naturaloperon_R",
+   "bases": "ATCCCGGGCCCGTCG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2259,
+     "annealed": "ATCCCGGGCCCGTCG",
+     "tm": 62,
+     "components": [
+      {
+       "bases": "ATCCCGGGCCCGTCG",
+       "range": "2259-2273"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR25_demipVeg_operon_R",
+   "bases": "AACACGAGCCCATTTTTGTCAAATAAAATTTATCCCGGGCCCGTCG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2259,
+     "annealed": "AACACGAGCCCATTTTTGTCAAATAAAATTTATCCCGGGCCCGTCG",
+     "tm": 70,
+     "components": [
+      {
+       "bases": "AACACGAGCCCATTTTTGTCAAATAAAATTTATCCCGGGCCCGTCG",
+       "range": "2259-2304"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR26_demipVeg_overlap_operon_R",
+   "bases": "CGCACATTTATTGTACAACACGAGCCCATTTTTGTCAAATAAAATTTATCCCGGGCCCGTCG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2259,
+     "annealed": "CGCACATTTATTGTACAACACGAGCCCATTTTTGTCAAATAAAATTTATCCCGGGCCCGTCG",
+     "tm": 72,
+     "components": [
+      {
+       "bases": "CGCACATTTATTGTACAACACGAGCCCATTTTTGTCAAATAAAATTTATCCCGGGCCCGTCG",
+       "range": "2259-2320"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "LR29_seq",
+   "bases": "TGGATAACCGTATTACCGCC",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 1927,
+     "annealed": "TGGATAACCGTATTACCGCC",
+     "tm": 56,
+     "components": [
+      {
+       "bases": "TGGATAACCGTATTACCGCC",
+       "range": "1908-1927"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "params": {
+  "minContinuousMatchLen": "10",
+  "allowMismatch": "1",
+  "minMeltingTemperature": "40",
+  "showAdditionalFivePrimeMatches": "1",
+  "minimumFivePrimeAnnealing": "15"
+ },
+ "primers": []
+}

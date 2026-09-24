@@ -1,0 +1,118 @@
+import fs from 'node:fs';
+import { Router } from 'express';
+import { ZipArchive } from 'archiver';
+import { query } from '../db.js';
+import { renderEntryPage } from '../lib/render.js';
+import { blobPath } from '../lib/storage.js';
+import { toGenbank } from '../lib/seq/genbank.js';
+
+const router = Router();
+
+const slug = (s) =>
+  String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '').slice(0, 60).toLowerCase() || 'entree';
+
+const README = `Export Paillasse
+================
+
+data.json      Toutes les données : projets, modèles, entrées, versions figées
+               (avec leurs empreintes SHA-256 chaînées) et pièces jointes.
+entries/       Chaque entrée en HTML autonome, lisible dans n'importe quel navigateur.
+               Une entrée verrouillée est rendue depuis sa version de verrouillage.
+files/         Les pièces jointes, nommées <id>_<nom d'origine>.
+               Leur SHA-256 figure dans data.json (champ attachments[].sha256).
+               Une image retouchée est un fichier à part : derived_from désigne
+               l'original (toujours présent) et edit_params liste les retouches.
+
+sequences/     Chaque séquence du registre en GenBank (copie de travail), ses versions
+               figées (versions/) et les fichiers importés d'origine (originaux/).
+               Données complètes au format paillasse-seq/1 dans data.json (rubrique sequences).
+tableaux/      Les images des tableaux de post-it (post-it et fils dans data.json, rubrique boards).
+
+Vérifier un fichier :  sha256sum files/<fichier>
+`;
+
+// Export complet : ne dépend pas de l'application pour être relu
+router.get('/', async (req, res) => {
+  const [projects, templates, entries, versions, attachments, users, boardNotes, boardLinks, boardImages,
+    sequences, sequenceVersions, sequenceFiles] = await Promise.all([
+    query(`SELECT id, name, description, color, archived, created_by, created_at, updated_at
+           FROM projects ORDER BY created_at`),
+    query('SELECT * FROM templates ORDER BY created_at'),
+    query(`SELECT id, project_id, parent_entry_id, title, entry_date, status, content, plain_text,
+                  revision, version_count, last_version_hash, locked_at, locked_by, archived,
+                  created_by, created_at, updated_at
+           FROM entries ORDER BY entry_date, created_at`),
+    query('SELECT * FROM entry_versions ORDER BY entry_id, version_number'),
+    query('SELECT * FROM attachments ORDER BY created_at'),
+    query('SELECT id, username, display_name, created_at FROM users'),
+    query('SELECT * FROM board_notes WHERE deleted_at IS NULL ORDER BY project_id, z'),
+    query('SELECT id, project_id, from_note, to_note, created_at FROM board_links WHERE deleted_at IS NULL'),
+    query('SELECT * FROM board_images ORDER BY created_at'),
+    query('SELECT * FROM sequences ORDER BY code'),
+    query('SELECT * FROM sequence_versions ORDER BY sequence_id, version_number'),
+    query('SELECT * FROM sequence_files ORDER BY created_at'),
+  ]).then((results) => results.map((r) => r.rows));
+
+  const fileNames = new Map(attachments.map((a) => [a.id, `${a.id}_${a.filename.replace(/[/\\]/g, '_')}`]));
+  const rewriteUrl = (url) => {
+    const m = /^\/api\/files\/([0-9a-f-]{36})/.exec(url);
+    return m && fileNames.has(m[1]) ? `../files/${encodeURIComponent(fileNames.get(m[1]))}` : url;
+  };
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const lastVersion = new Map();
+  for (const v of versions) lastVersion.set(v.entry_id, v);
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.attachment(`paillasse-export-${stamp}.zip`);
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  archive.on('warning', (err) => console.warn('Export :', err.message));
+  archive.on('error', (err) => {
+    console.error('Export interrompu :', err);
+    res.destroy(err);
+  });
+  archive.pipe(res);
+
+  archive.append(README, { name: 'LISEZMOI.txt' });
+  archive.append(
+    JSON.stringify({
+      exported_at: new Date().toISOString(), format: 'paillasse/1', users, projects, templates, entries, versions, attachments,
+      boards: { notes: boardNotes, links: boardLinks, images: boardImages },
+      sequences: { format: 'paillasse-seq/1', working_copies: sequences, versions: sequenceVersions, original_files: sequenceFiles },
+    }, null, 2),
+    { name: 'data.json' },
+  );
+  for (const e of entries) {
+    const version = e.status === 'locked' ? lastVersion.get(e.id) : null;
+    const html = renderEntryPage({
+      entry: e, project: projectById.get(e.project_id), version,
+      author: version ? userById.get(version.created_by)?.display_name : null, rewriteUrl,
+    });
+    const archivedTag = e.archived ? '_archivee' : '';
+    archive.append(html, { name: `entries/${e.entry_date}_${slug(e.title)}_${e.id.slice(0, 8)}${archivedTag}.html` });
+  }
+  for (const a of attachments) {
+    const p = blobPath(a.sha256);
+    if (fs.existsSync(p)) archive.file(p, { name: `files/${fileNames.get(a.id)}` });
+  }
+  // Chaque séquence en GenBank (copie de travail + chaque version figée) et ses fichiers d'origine
+  for (const seq of sequences) {
+    const base = `${seq.code}_${seq.name}`.replace(/[^\w.-]+/g, '_').slice(0, 100);
+    archive.append(toGenbank(seq), { name: `sequences/${base}.gb` });
+    for (const v of sequenceVersions.filter((x) => x.sequence_id === seq.id)) {
+      archive.append(toGenbank({ ...v, description: v.description || v.name }), { name: `sequences/versions/${base}_v${v.version_number}.gb` });
+    }
+  }
+  for (const f of sequenceFiles) {
+    const p = blobPath(f.sha256);
+    if (fs.existsSync(p)) archive.file(p, { name: `sequences/originaux/${f.id}_${f.filename.replace(/[/\\]/g, '_')}` });
+  }
+  for (const img of boardImages) {
+    const p = blobPath(img.sha256);
+    if (fs.existsSync(p)) archive.file(p, { name: `tableaux/${img.id}_${img.filename.replace(/[/\\]/g, '_')}` });
+  }
+  await archive.finalize();
+});
+
+export default router;

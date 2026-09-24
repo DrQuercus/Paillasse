@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Éditeur de séquence</title>
+    <link rel="stylesheet" href="/vendor/ove/ove.css" />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+      #editor { height: 100%; }
+      /* Barre d'état d'OVE (en anglais) remplacée par celle de Paillasse */
+      .veStatusBar { display: none !important; }
+      /* Amorces façon SnapGene : bandeau discret, lettres alignées sur la séquence,
+         bases non hybridées (queue 5′, mésappariements) en rouge */
+      .vePrimer path { stroke: #7f95bf !important; stroke-width: .8px; }
+      .tg-primer-bases, .tg-primer-bases-insert { fill: #1b2f5e; }
+      .tg-primer-bases .tg-no-match-seq, .tg-primer-bases-insert, .tg-primer-bases-insert tspan { fill: #c0392b; font-weight: 700; }
+      #status { position: absolute; inset: 0; display: grid; place-items: center; font: 14px system-ui, sans-serif; color: #56627a; }
+    </style>
+  </head>
+  <body>
+    <div id="status">Chargement de l'éditeur…</div>
+    <div id="editor"></div>
+    <script src="/vendor/ove/index.umd.js"></script>
+    <script src="/sequence-editor.js"></script>
+  </body>
+</html>

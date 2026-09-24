@@ -1,0 +1,23 @@
+# /etc/systemd/system/paillasse.service
+# Adapter User/Group et les chemins si l'application n'est pas dans /opt/paillasse
+[Unit]
+Description=Paillasse, cahier de labo électronique
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=paillasse
+Group=paillasse
+WorkingDirectory=/opt/paillasse/server
+EnvironmentFile=/opt/paillasse/server/.env
+# Node installé via nvm : remplacer par le chemin complet (which node)
+ExecStart=/usr/bin/env node src/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

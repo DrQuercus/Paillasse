@@ -1,0 +1,161 @@
+{
+ "params": {
+  "minContinuousMatchLen": "10",
+  "allowMismatch": "1",
+  "minMeltingTemperature": "36",
+  "showAdditionalFivePrimeMatches": "1",
+  "minimumFivePrimeAnnealing": "15"
+ },
+ "primers": [
+  {
+   "name": "NB1",
+   "bases": "TTAAGAAGGAGATATACCATGGatgtcaggtgaacaaaaatcatatttag",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 2366,
+     "annealed": "TGatgtcaggtgaacaaaaatcatatttag",
+     "tm": 54,
+     "components": [
+      {
+       "bases": "TTAAGAAGGAGATATACCA",
+       "range": null
+      },
+      {
+       "bases": "TG",
+       "range": "2336-2337"
+      },
+      {
+       "bases": "G",
+       "range": null
+      },
+      {
+       "bases": "atgtcaggtgaacaaaaatcatatttag",
+       "range": "2339-2366"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "NB7",
+   "bases": "CGAGCTCGAATTCGGATCCTTAGTGGTGATGATGGTGATGGCTGCTGCCctcttctgcttgtttttcttcgt",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 3555,
+     "annealed": "GGCTGCTGCCctcttctgcttgtttttcttcgt",
+     "tm": 55,
+     "components": [
+      {
+       "bases": "CGAGCTCGAATTCGGATCCTTAGTGGTGATGATGGTGAT",
+       "range": null
+      },
+      {
+       "bases": "GGCTGC",
+       "range": "3599-3604"
+      },
+      {
+       "bases": "TGCC",
+       "range": "3583-3586"
+      },
+      {
+       "bases": "ctcttctgcttgtttttcttcgt",
+       "range": "3555-3577"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "GO 7",
+   "bases": "GGAATATGGCAGGATTAATTCGTGT",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 402,
+     "annealed": "GGAATATGGCAGGATTAATTCGTGT",
+     "tm": 57,
+     "components": [
+      {
+       "bases": "GGAATATGGCAGGATTAATTCGTGT",
+       "range": "378-402"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "GO11",
+   "bases": "GATTACTTCATCATCCGTCACATCG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2503,
+     "annealed": "GATTACTTCATCATCCGTCACATCG",
+     "tm": 58,
+     "components": [
+      {
+       "bases": "GATTACTTCATCATCCGTCACATCG",
+       "range": "2503-2527"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "NB15",
+   "bases": "TTGGAGAGTTATTTGGGTCTTTTGG",
+   "sites": [
+    {
+     "strand": 1,
+     "three_prime_end": 164,
+     "annealed": "TTGGAGAGTTATTTGGGTCTTTTGG",
+     "tm": 57,
+     "components": [
+      {
+       "bases": "TTGGAGAGTTATTTGGGTCTTTTGG",
+       "range": "140-164"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "NB16",
+   "bases": "TCATTGAATTTCAGGTAGTCTTCAAACG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2817,
+     "annealed": "TCATTGAATTTCAGGTAGTCTTCAAACG",
+     "tm": 58,
+     "components": [
+      {
+       "bases": "TCATTGAATTTCAGGTAGTCTTCAAACG",
+       "range": "2817-2844"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "GO91_RYukCup",
+   "bases": "CCTTTCATAATATTTCAAGCCGGTCTCCGTTTGTAATGCCTTACCGTTCGTATAATGTATGCTATACGAAG",
+   "sites": [
+    {
+     "strand": -1,
+     "three_prime_end": 2258,
+     "annealed": "CCTTTCATAATATTTCAAGCCGGTCTCCGTTTGTAATGCCTTACCGTTCGTATAATGTATGCTATACGAAG",
+     "tm": 70,
+     "components": [
+      {
+       "bases": "CCTTTCATAATATTTCAAGCCGGTCTCCGTTTGTAATGCCTTACCGTTCGTATAATGTATGCTATACGAAG",
+       "range": "2258-2328"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

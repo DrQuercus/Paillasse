@@ -1,0 +1,37 @@
+{
+  "name": "paillasse-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/copy-ove.mjs && vite build",
+    "preview": "vite preview",
+    "postinstall": "node scripts/copy-ove.mjs"
+  },
+  "dependencies": {
+    "@fontsource/caveat": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@teselagen/ove": "^0.8.42",
+    "@tiptap/extension-bubble-menu": "^3.31.3",
+    "@tiptap/extension-highlight": "^3.31.3",
+    "@tiptap/extension-image": "^3.31.3",
+    "@tiptap/extension-list": "^3.31.3",
+    "@tiptap/extension-subscript": "^3.31.3",
+    "@tiptap/extension-superscript": "^3.31.3",
+    "@tiptap/extension-table": "^3.31.3",
+    "@tiptap/extensions": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "lucide-react": "^1.47.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

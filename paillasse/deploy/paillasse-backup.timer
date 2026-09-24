@@ -1,0 +1,10 @@
+# /etc/systemd/system/paillasse-backup.timer
+[Unit]
+Description=Sauvegarde quotidienne de Paillasse
+
+[Timer]
+OnCalendar=*-*-* 02:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

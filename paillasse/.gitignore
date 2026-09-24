@@ -1,0 +1,6 @@
+node_modules/
+client/dist/
+server/.env
+data/
+*.dump
+client/public/vendor/
