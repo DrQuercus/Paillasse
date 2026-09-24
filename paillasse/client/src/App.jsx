@@ -19,6 +19,7 @@ import TemplateEditPage from './pages/TemplateEditPage.jsx';
 
 const CalcPage = lazy(() => import('./pages/CalcPage.jsx'));
 const GelPage = lazy(() => import('./pages/GelPage.jsx'));
+const StatsPage = lazy(() => import('./pages/StatsPage.jsx'));
 
 function EntryRoute() {
   const { id } = useParams();
@@ -96,6 +97,8 @@ export default function App() {
             <Route path="/sequences/:id" element={<SequenceRoute />} />
             <Route path="/gels" element={<Suspense fallback={null}><GelPage /></Suspense>} />
             <Route path="/gels/:tab" element={<Suspense fallback={null}><GelPage /></Suspense>} />
+            <Route path="/stats" element={<Suspense fallback={null}><StatsPage /></Suspense>} />
+            <Route path="/stats/:id" element={<Suspense fallback={null}><StatsPage /></Suspense>} />
             <Route path="/calc" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
             <Route path="/calc/:kind" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
             <Route path="/templates" element={<TemplatesPage />} />

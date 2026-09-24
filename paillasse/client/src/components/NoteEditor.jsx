@@ -11,6 +11,7 @@ import { SequencePicker } from './SequenceRef.jsx';
 // Calculateurs et atelier Gels : chargés à la première ouverture
 const CalcDialog = lazy(() => import('./calc/CalcDialog.jsx'));
 const GelEditorSession = lazy(() => import('./gel/GelEditorSession.jsx'));
+const StatEditorSession = lazy(() => import('./stats/StatEditorSession.jsx'));
 
 // Formats que tous les navigateurs savent afficher dans la page
 const DISPLAYABLE = /^image\/(png|jpe?g|gif|webp|avif|bmp)$/i;
@@ -92,6 +93,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
   const [pickingSequence, setPickingSequence] = useState(false);
   const [insertingCalc, setInsertingCalc] = useState(false);
   const [gelSession, setGelSession] = useState(null); // { attrs?, apply?, attachmentId?, filename?, insertAt? }
+  const [statSession, setStatSession] = useState(null); // { attrs?, apply?, table? }
 
   const handleFiles = async (files, pos) => {
     let at = pos;
@@ -170,7 +172,22 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
   useEffect(() => {
     if (!editor?.storage.gelFigure) return;
     editor.storage.gelFigure.edit = canUploadNow ? (attrs, apply) => setGelSession({ attrs, apply }) : null;
+    if (editor.storage.statFigure) editor.storage.statFigure.edit = canUploadNow ? (attrs, apply) => setStatSession({ attrs, apply }) : null;
   }, [editor, canUploadNow]);
+
+  // Tableau sous le curseur : proposé comme données du graphique
+  const tableAtCursor = () => {
+    const { $from } = editor.state.selection;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      const node = $from.node(depth);
+      if (node.type.name === 'table') {
+        const grid = [];
+        node.forEach((row) => { const cells = []; row.forEach((cell) => cells.push(cell.textContent.trim())); grid.push(cells); });
+        return grid;
+      }
+    }
+    return null;
+  };
 
   const analyseSelectedImage = () => {
     const { selection } = editor.state;
@@ -228,6 +245,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
           onInsertSequence={canUpload ? () => setPickingSequence(true) : undefined}
           onInsertCalc={() => setInsertingCalc(true)}
           onInsertGel={canUpload ? () => setGelSession({}) : undefined}
+          onInsertStats={canUpload ? () => setStatSession({ table: tableAtCursor() }) : undefined}
         />
       )}
       {editor && editable && canUpload && (
@@ -278,6 +296,27 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
               } else {
                 insertBlock(editor, node);
               }
+            }}
+          />
+        </Suspense>
+      )}
+      {statSession && (
+        <Suspense fallback={null}>
+          <StatEditorSession
+            session={statSession}
+            upload={(file, derivation) => onUploadRef.current(file, derivation)}
+            onClose={() => setStatSession(null)}
+            onUpdate={(attrs) => statSession.apply?.(attrs)}
+            onInsert={(attrs) => {
+              const node = { type: 'statFigure', attrs };
+              if (statSession.table) {
+                // Sous le tableau analysé, et non dedans
+                const { $from } = editor.state.selection;
+                let pos = null;
+                for (let depth = $from.depth; depth > 0; depth -= 1) if ($from.node(depth).type.name === 'table') { pos = $from.after(depth); break; }
+                if (pos !== null) { editor.chain().focus().insertContentAt(pos, node).run(); placeCursorBelow(editor); return; }
+              }
+              insertBlock(editor, node);
             }}
           />
         </Suspense>

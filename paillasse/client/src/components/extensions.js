@@ -11,6 +11,7 @@ import Superscript from '@tiptap/extension-superscript';
 import { SequenceRefNode } from './SequenceRef.jsx';
 import { LabCalcNode } from './calc/LabCalcNode.jsx';
 import { GelFigureNode } from './gel/GelFigureNode.jsx';
+import { StatFigureNode } from './stats/StatFigureNode.jsx';
 
 export const IMAGE_SIZES = [25, 50, 75, 100];
 
@@ -76,5 +77,6 @@ export function buildExtensions({ placeholder } = {}) {
     SequenceRefNode,
     LabCalcNode,
     GelFigureNode,
+    StatFigureNode,
   ];
 }

@@ -1,6 +1,7 @@
 // Outils pour les documents ProseMirror/TipTap (JSON)
 import { calcToText } from './calc.js';
 import { gelToText } from './gel.js';
+import { statToText } from './stat.js';
 
 export const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
 
@@ -24,6 +25,7 @@ export function docToPlainText(doc) {
     else if (node.type === 'sequenceRef') out.push(`\n${node.attrs?.code ?? ''} ${node.attrs?.name ?? ''}\n`);
     else if (node.type === 'labCalc') out.push(`\n${calcToText(node.attrs?.summary)}\n`);
     else if (node.type === 'gelFigure') out.push(`\n${gelToText(node.attrs)}\n`);
+    else if (node.type === 'statFigure') out.push(`\n${statToText(node.attrs)}\n`);
     else if (node.type === 'tableCell' || node.type === 'tableHeader') {
       (node.content ?? []).forEach(walk);
       out.push('\t');

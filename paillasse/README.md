@@ -108,6 +108,42 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   (réglages, pistes, étalonnage) est enregistrée dans l'encart. Le tableau et les notes restent du texte :
   scellés avec la version, imprimés, exportés et trouvés par la recherche. « Modifier » rouvre l'atelier tant
   que l'entrée est un brouillon ; une fois verrouillée, « Reprendre » rouvre l'analyse sur la page Gels.
+- **Statistiques et graphiques** (menu « Statistiques », à la façon de GraphPad Prism) : cinq types de tableaux,
+  saisis au clavier ou collés depuis Excel / LibreOffice (virgule décimale acceptée), avec réplicats :
+  - *Colonnes* : statistiques descriptives (moyenne, écart-type, SEM, IC 95 %, médiane, quartiles, CV) et
+    normalité (Shapiro-Wilk, D'Agostino-Pearson) ; test t non apparié (Student ou Welch), apparié, à un
+    échantillon, Mann-Whitney (exact ou approché), Wilcoxon ; ANOVA à un facteur (ordinaire, Welch, mesures
+    répétées avec correction de Geisser-Greenhouse), Kruskal-Wallis, Friedman ; comparaisons multiples de
+    Tukey, Dunnett (contre un témoin), Šidák, Bonferroni, LSD de Fisher, Games-Howell, Dunn ; test de
+    Brown-Forsythe et de Bartlett sur les variances. En mode « Automatique », l'analyse suit le nombre de
+    colonnes remplies.
+  - *XY* : régression linéaire (pente, ordonnée, IC, R², test de la pente), corrélation de Pearson et de
+    Spearman, ajustement non linéaire (dose-réponse à 3 ou 4 paramètres avec EC50 et son IC, Michaelis-Menten,
+    liaison avec pente de Hill, décroissance et association exponentielles, croissance, polynôme), avec
+    passage automatique des concentrations en log ; **courbe étalon** : les X d'échantillons inconnus sont
+    lus sur la droite ou la courbe ajustée.
+  - *Groupé* : ANOVA à deux facteurs (sommes des carrés de type III, plans déséquilibrés compris,
+    interaction), comparaisons dans chaque ligne ou chaque colonne (Šidák, Tukey, Bonferroni, Fisher).
+  - *Contingence* : χ² (avec correction de Yates en 2 × 2), test exact de Fisher, risque relatif et rapport
+    de cotes avec leurs IC.
+  - *Survie* : Kaplan-Meier (erreur type de Greenwood), survies médianes, log-rank (Mantel-Cox),
+    Gehan-Breslow-Wilcoxon, rapport des risques (hazard ratio).
+
+  La feuille de résultats reprend la présentation de Prism (P « < 0,0001 », résumé en étoiles, IC 95 %,
+  avertissements quand une hypothèse n'est pas tenue). Le **générateur de graphiques** se met à jour à chaque
+  frappe : nuage de points, barres, boîtes à moustaches, violons, moyennes et barres d'erreur (écart-type,
+  SEM, IC 95 %, étendue), barres groupées, points XY avec courbe ajustée et bande de confiance, axes
+  logarithmiques, barres empilées, courbes de survie avec censures ; crochets de significativité placés
+  sans chevauchement (étoiles ou valeurs de P, seuils classiques ou de Prism) ; titres, axes, couleurs
+  par série, taille du texte et des points, préréglages Classique, Article, Diaporama et Niveaux de gris ;
+  export PNG et SVG. Les tableaux de la page Statistiques s'enregistrent seuls (annuler / rétablir).
+- **Graphique dans une entrée** : bouton « Graphique et statistiques » de la barre d'outils, ou « Insérer dans
+  une entrée » depuis la page Statistiques. Le curseur dans un tableau de l'entrée ? Le bouton propose
+  « Analyser le tableau où se trouve le curseur » et le graphique vient se placer juste dessous. L'image du
+  graphique est jointe à l'entrée, les données sont copiées dans l'encart et les résultats restent du texte :
+  scellés, imprimés, exportés et trouvés par la recherche. « Modifier » rouvre l'atelier tant que l'entrée est
+  un brouillon ; une fois verrouillée, « Reprendre » copie les données dans un nouveau jeu de la page
+  Statistiques.
 - **Modèles** de protocoles, créés à la main ou à partir d'une entrée.
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
@@ -246,6 +282,23 @@ Corrections par rapport à SDS-PAGE Analyzer :
   réglages de détection en pixels (ils dépendent maintenant de la hauteur du gel) ; rapport 1 : 1,5 jamais
   simplifié en 2 : 3.
 
+## Statistiques : fiabilité
+
+Le moteur est dans `client/src/lib/stats/` (sans React) et `npm --prefix client test` compare chaque résultat
+à scipy et statsmodels (`client/test/fixtures/stats/goldens.json`, régénéré par
+`pip install scipy statsmodels pandas && python3 client/test/make-stats-goldens.py`) : lois de Student, F,
+χ², normale et leurs quantiles, étendue studentisée (Tukey) et loi de Dunnett calculées par intégration
+numérique, Shapiro-Wilk, D'Agostino, tests t, Mann-Whitney et Wilcoxon exacts, ANOVA ordinaire, de Welch et
+à mesures répétées (ε de Geisser-Greenhouse), Kruskal-Wallis, Friedman, Tukey et Dunnett avec leurs IC,
+régressions linéaire et non linéaires, ANOVA à deux facteurs de type III (équilibrée ou non), contingence
+et survie. Les écarts tolérés vont de 1e-12 (lois) à 1e-4 (ajustements itératifs).
+
+Le calcul se fait dans le navigateur, sans envoyer les données ailleurs. Le serveur ne refait pas l'analyse :
+il vérifie que l'image de l'encart est une pièce jointe de l'entrée et affiche le résumé enregistré
+(`server/src/lib/stat.js`). Les jeux de données de la page Statistiques sont dans la table `datasets`
+(migration `008_datasets.sql`) : révision vérifiée à chaque enregistrement (deux onglets ne s'écrasent pas),
+archivage au lieu de suppression.
+
 ## Séquences : fiabilité
 
 Le lecteur SnapGene est propre à Paillasse : les bibliothèques JavaScript existantes perdaient les
@@ -285,7 +338,9 @@ server/
   src/lib/render.js            rendu HTML (impression, export)
   src/lib/calc.js              encart de calcul : vérification, rendu imprimable, texte de recherche
   src/lib/gel.js               encart de figure de gel : vérification, rendu imprimable, texte de recherche
-  src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs
+  src/lib/stat.js              encart de graphique statistique : vérification, rendu imprimable, texte de recherche
+  src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
+                               jeux de données statistiques
   scripts/create-user.js       créer un compte ou changer un mot de passe
 client/
   src/pages/EntryPage.jsx      édition d'une entrée : autosave, versions, verrou
@@ -296,6 +351,9 @@ client/
   src/lib/gel/                 analyse de gel : TIFF, image, profils, étalonnage, quantification, figure (testés)
   src/components/gel/          atelier (GelWorkbench : pas à pas ou rapide), panneau d'analyse, encart (GelFigureNode)
   src/pages/GelPage.jsx        page Gels (analyse libre, marqueurs)
+  src/lib/stats/               lois, tests, régressions, ANOVA, contingence, survie, graphiques SVG (testés contre scipy)
+  src/components/stats/        atelier (StatWorkbench : tableau, analyse, graphique), encart (StatFigureNode)
+  src/pages/StatsPage.jsx      page Statistiques (nouveaux tableaux, jeux de données enregistrés)
 deploy/                        service systemd, sauvegarde et son timer
 ```
 

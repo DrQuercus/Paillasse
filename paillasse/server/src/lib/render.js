@@ -1,6 +1,7 @@
 // Rendu HTML autonome d'un document TipTap (export, impression, PDF via le navigateur)
 import { calcSummary } from './calc.js';
 import { gelImages, gelLayout, gelSummary, panelWidths } from './gel.js';
+import { statImages, statSummary } from './stat.js';
 
 export const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -74,6 +75,24 @@ function renderGel(attrs, rewriteUrl) {
     + `${s.notes.map((n) => `<p class="calc-note">${escapeHtml(n)}</p>`).join('')}</figure>`;
 }
 
+/** Graphique et statistiques : image, méthode, résultats (libellés et valeurs, tableaux). */
+function renderStat(attrs, rewriteUrl) {
+  const s = statSummary(attrs?.summary);
+  const width = [25, 50, 75, 100].includes(Number(attrs?.width)) ? Number(attrs.width) : 75;
+  const images = statImages(attrs?.images).map((i) => `<img src="${escapeHtml(rewriteUrl(safeUrl(i.src)))}" alt="${escapeHtml(i.alt)}" style="width:${width}%">`).join('');
+  const sections = s.sections.map((sec) => {
+    const body = sec.table
+      ? `<table class="calc-table"><thead><tr>${sec.table.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`
+        + `<tbody>${sec.table.rows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+      : `<table class="calc-table">${sec.rows.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('')}</table>`;
+    return `<p class="statfig-section">${escapeHtml(sec.title)}</p>${body}`;
+  }).join('');
+  return `<figure class="statfig"><figcaption><strong>${escapeHtml(s.title)}</strong>${s.kind ? ` — tableau ${escapeHtml(s.kind)}` : ''}${s.analysis ? ` — ${escapeHtml(s.analysis)}` : ''}</figcaption>`
+    + `<div class="statfig-graph">${images}</div>`
+    + `${s.method ? `<p class="calc-note">${escapeHtml(s.method)}</p>` : ''}${sections}`
+    + `${s.warnings.map((w) => `<p class="calc-note">⚠ ${escapeHtml(w)}</p>`).join('')}</figure>`;
+}
+
 export function renderDoc(doc, options = {}) {
   // Attention : { rewriteUrl: undefined } passé explicitement ne doit pas écraser la valeur par défaut
   const opts = { rewriteUrl: options.rewriteUrl ?? ((u) => u) };
@@ -106,6 +125,7 @@ export function renderDoc(doc, options = {}) {
         return `<p class="seqref">Séquence <strong>${escapeHtml(a.code)}</strong> « ${escapeHtml(a.name)} », version ${Number(a.version)} (${Number(a.length).toLocaleString('fr-FR')} pb, ${a.circular ? 'circulaire' : 'linéaire'})</p>`;
       case 'labCalc': return renderCalc(a.summary);
       case 'gelFigure': return renderGel(a, opts.rewriteUrl);
+      case 'statFigure': return renderStat(a, opts.rewriteUrl);
       case 'table': return `<table>${children(node)}</table>`;
       case 'tableRow': return `<tr>${children(node)}</tr>`;
       case 'tableHeader': return `<th${cellAttrs(a)}>${children(node)}</th>`;
@@ -149,6 +169,11 @@ const PRINT_CSS = `
   .gelfig-panels { display: flex; flex-direction: column; align-items: flex-start; gap: .6rem; }
   .gelfig-row .gelfig-panels, .gelfig-grid .gelfig-panels { flex-direction: row; flex-wrap: wrap; gap: .6rem 0; }
   .gelfig img { flex: none; max-width: 100%; height: auto; break-inside: avoid; }
+  .statfig { border: 1px solid #B8C3D0; border-left: 4px solid #6D28D9; padding: .5rem .8rem; margin: 1rem 0; }
+  .statfig figcaption { font-size: .9rem; margin-bottom: .4rem; }
+  .statfig img { max-width: 100%; height: auto; break-inside: avoid; }
+  .statfig-section { font-weight: 600; font-size: .85rem; margin: .7rem 0 .2rem; }
+  .statfig .calc-table th { text-align: left; font-weight: 500; }
   footer { margin-top: 2.5rem; border-top: 1px solid #B8C3D0; padding-top: .75rem; font-size: .8rem; color: #55607A; }
   footer code { word-break: break-all; }
   .noprint { position: fixed; top: 1rem; right: 1rem; font: inherit; padding: .4rem .9rem; border: 1px solid #1F2A44; background: #fff; cursor: pointer; }

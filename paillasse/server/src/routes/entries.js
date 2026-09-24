@@ -6,6 +6,7 @@ import { createVersion, verifyEntry } from '../lib/versions.js';
 import { renderEntryPage } from '../lib/render.js';
 import { cleanCalcNode } from '../lib/calc.js';
 import { cleanGelNode, gelAttachmentIds } from '../lib/gel.js';
+import { cleanStatNode, statAttachmentIds } from '../lib/stat.js';
 
 const router = Router();
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -123,18 +124,19 @@ router.put('/:id', async (req, res) => {
   });
 });
 
-// Ajoute un encart à la fin d'un brouillon : calcul (page Calculs) ou figure de gel (page Gels).
+// Ajoute un encart à la fin d'un brouillon : calcul (page Calculs), figure de gel (page Gels)
+// ou graphique et statistiques (page Statistiques).
 // Un onglet ouvert sur l'entrée verra le conflit de révision et proposera de recharger.
 router.post('/:id/blocks', async (req, res) => {
   const type = req.body?.node?.type;
-  const node = type === 'gelFigure' ? cleanGelNode(req.body.node) : cleanCalcNode(req.body?.node);
+  const node = type === 'gelFigure' ? cleanGelNode(req.body.node) : type === 'statFigure' ? cleanStatNode(req.body.node) : cleanCalcNode(req.body?.node);
   const result = await tx(async (db) => {
     const { rows: [entry] } = await db.query('SELECT status, content FROM entries WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!entry) throw notFound('Entrée');
     if (entry.status === 'locked') throw new HttpError(409, 'Entrée verrouillée : ajoutez-le dans un addendum.');
-    if (node.type === 'gelFigure') {
-      // Les images et l'original doivent être des pièces jointes de cette entrée (scellées avec elle)
-      const ids = gelAttachmentIds(node.attrs);
+    if (node.type === 'gelFigure' || node.type === 'statFigure') {
+      // Les images (et l'original d'un gel) doivent être des pièces jointes de cette entrée (scellées avec elle)
+      const ids = node.type === 'gelFigure' ? gelAttachmentIds(node.attrs) : statAttachmentIds(node.attrs);
       const { rows } = await db.query('SELECT id FROM attachments WHERE entry_id = $1 AND id = ANY($2::uuid[])', [req.params.id, ids]);
       if (rows.length !== ids.length) throw new HttpError(400, 'Les images de la figure doivent être jointes à cette entrée.');
     }

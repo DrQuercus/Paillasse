@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditorState } from '@tiptap/react';
 import {
-  Bold, Calculator, ChevronDown, Code, Columns4, Dna, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListChecks, ListOrdered,
+  Bold, Calculator, ChartColumn, ChevronDown, Code, Columns4, Dna, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListChecks, ListOrdered,
   Minus, Paperclip, Quote, Redo2, SquareCode, Strikethrough, Subscript, Superscript, Table,
   Underline, Undo2,
 } from 'lucide-react';
@@ -93,7 +93,7 @@ function TableMenu({ editor, inTable }) {
   );
 }
 
-export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc, onInsertGel }) {
+export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc, onInsertGel, onInsertStats }) {
   const imageInput = useRef(null);
   const fileInput = useRef(null);
 
@@ -188,6 +188,7 @@ export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onI
           <Btn label="Joindre un fichier" onClick={() => fileInput.current.click()}><Paperclip size={16} /></Btn>
           {onInsertSequence && <Btn label="Insérer une séquence du registre" onClick={onInsertSequence}><Dna size={16} /></Btn>}
           {onInsertGel && <Btn label="Insérer une figure de gel (SDS-PAGE, western blot, ADN)" onClick={onInsertGel}><Columns4 size={16} /></Btn>}
+          {onInsertStats && <Btn label="Graphique et statistiques (test t, ANOVA, régression…) ; dans un tableau : l’analyser" onClick={onInsertStats}><ChartColumn size={16} /></Btn>}
           <input ref={imageInput} type="file" accept="image/*" multiple hidden onChange={pick(imageInput)} />
           <input ref={fileInput} type="file" multiple hidden onChange={pick(fileInput)} />
           {uploading > 0 && <span className="tool-status">Envoi de {uploading} fichier{uploading > 1 ? 's' : ''}…</span>}
