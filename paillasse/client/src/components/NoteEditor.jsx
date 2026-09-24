@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import { Crop } from 'lucide-react';
@@ -7,6 +7,9 @@ import { IMAGE_SIZES, buildExtensions } from './extensions.js';
 import Toolbar from './Toolbar.jsx';
 import ImageEditor from './ImageEditor.jsx';
 import { SequencePicker } from './SequenceRef.jsx';
+
+// Calculateurs : chargés à la première ouverture de la fenêtre de calcul
+const CalcDialog = lazy(() => import('./calc/CalcDialog.jsx'));
 
 // Formats que tous les navigateurs savent afficher dans la page
 const DISPLAYABLE = /^image\/(png|jpe?g|gif|webp|avif|bmp)$/i;
@@ -23,6 +26,17 @@ function placeCursorBelow(editor) {
   const chain = editor.chain();
   if (!(next?.isTextblock && next.content.size === 0)) chain.insertContentAt(end, { type: 'paragraph' });
   chain.setTextSelection(end + 1).scrollIntoView().run();
+}
+
+/**
+ * Insère un bloc (séquence, calcul) au curseur. Si un bloc est sélectionné (clic sur une image,
+ * un encart…), le nouveau se place dessous au lieu de le remplacer.
+ */
+function insertBlock(editor, node) {
+  const { selection } = editor.state;
+  const chain = editor.chain().focus();
+  (selection.node ? chain.insertContentAt(selection.to, node) : chain.insertContent(node)).run();
+  placeCursorBelow(editor);
 }
 
 /** Insère une pièce jointe : image affichée dans le texte, autre fichier sous forme de lien. */
@@ -72,6 +86,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
   const [uploading, setUploading] = useState(0);
   const [imageEdit, setImageEdit] = useState(null); // { pos, src }
   const [pickingSequence, setPickingSequence] = useState(false);
+  const [insertingCalc, setInsertingCalc] = useState(false);
 
   const handleFiles = async (files, pos) => {
     let at = pos;
@@ -192,6 +207,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
           onPickFiles={(files) => handleFiles(files)}
           uploading={uploading}
           onInsertSequence={canUpload ? () => setPickingSequence(true) : undefined}
+          onInsertCalc={() => setInsertingCalc(true)}
         />
       )}
       {editor && editable && canUpload && (
@@ -211,10 +227,20 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
           onClose={() => setPickingSequence(false)}
           onPick={(attrs) => {
             setPickingSequence(false);
-            editor.chain().focus().insertContent({ type: 'sequenceRef', attrs }).run();
-            placeCursorBelow(editor);
+            insertBlock(editor, { type: 'sequenceRef', attrs });
           }}
         />
+      )}
+      {insertingCalc && (
+        <Suspense fallback={null}>
+          <CalcDialog
+            onClose={() => setInsertingCalc(false)}
+            onApply={(attrs) => {
+              setInsertingCalc(false);
+              insertBlock(editor, { type: 'labCalc', attrs });
+            }}
+          />
+        </Suspense>
       )}
       {imageEdit && <ImageEditor src={imageEdit.src} onApply={applyImageEdit} onClose={closeImageEdit} />}
     </div>

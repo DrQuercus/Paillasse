@@ -4,6 +4,7 @@ import { HttpError, notFound } from '../lib/errors.js';
 import { EMPTY_DOC, docToPlainText, isDoc } from '../lib/doc.js';
 import { createVersion, verifyEntry } from '../lib/versions.js';
 import { renderEntryPage } from '../lib/render.js';
+import { cleanCalcNode } from '../lib/calc.js';
 
 const router = Router();
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -119,6 +120,29 @@ router.put('/:id', async (req, res) => {
     revision: current[0].revision,
     error: "Cette entrée a été modifiée ailleurs (autre onglet ?). Rechargez-la avant de continuer.",
   });
+});
+
+// Ajoute un encart de calcul à la fin d'un brouillon (envoyé depuis la page Calculs).
+// Un onglet ouvert sur l'entrée verra le conflit de révision et proposera de recharger.
+router.post('/:id/blocks', async (req, res) => {
+  const node = cleanCalcNode(req.body?.node);
+  const result = await tx(async (db) => {
+    const { rows: [entry] } = await db.query('SELECT status, content FROM entries WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!entry) throw notFound('Entrée');
+    if (entry.status === 'locked') throw new HttpError(409, 'Entrée verrouillée : ajoutez le calcul dans un addendum.');
+    const blocks = [...(isDoc(entry.content) ? entry.content.content ?? [] : [])];
+    // Le paragraphe vide qui termine souvent une entrée est remplacé, pas laissé au-dessus du calcul
+    const last = blocks.at(-1);
+    if (last?.type === 'paragraph' && !last.content?.length) blocks.pop();
+    const content = { type: 'doc', content: [...blocks, node, { type: 'paragraph' }] };
+    const { rows } = await db.query(
+      `UPDATE entries SET content = $2, plain_text = $3, revision = revision + 1, updated_at = now()
+       WHERE id = $1 RETURNING revision, updated_at`,
+      [req.params.id, JSON.stringify(content), docToPlainText(content)],
+    );
+    return rows[0];
+  });
+  res.status(201).json(result);
 });
 
 router.get('/:id/versions', async (req, res) => {

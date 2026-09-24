@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "node scripts/copy-ove.mjs && vite build",
     "preview": "vite preview",
-    "postinstall": "node scripts/copy-ove.mjs"
+    "postinstall": "node scripts/copy-ove.mjs",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@fontsource/caveat": "^5.3.0",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { api } from './api.js';
 import { AppContext } from './context.js';
@@ -16,6 +16,8 @@ import EntryPage from './pages/EntryPage.jsx';
 import SearchPage from './pages/SearchPage.jsx';
 import TemplatesPage from './pages/TemplatesPage.jsx';
 import TemplateEditPage from './pages/TemplateEditPage.jsx';
+
+const CalcPage = lazy(() => import('./pages/CalcPage.jsx'));
 
 function EntryRoute() {
   const { id } = useParams();
@@ -91,6 +93,8 @@ export default function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/sequences" element={<SequencesPage />} />
             <Route path="/sequences/:id" element={<SequenceRoute />} />
+            <Route path="/calc" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
+            <Route path="/calc/:kind" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/templates/:id" element={<TemplateRoute />} />
             <Route path="*" element={<Navigate to="/" replace />} />

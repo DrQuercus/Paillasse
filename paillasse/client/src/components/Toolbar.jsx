@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditorState } from '@tiptap/react';
 import {
-  Bold, ChevronDown, Code, Dna, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListChecks, ListOrdered,
+  Bold, Calculator, ChevronDown, Code, Dna, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListChecks, ListOrdered,
   Minus, Paperclip, Quote, Redo2, SquareCode, Strikethrough, Subscript, Superscript, Table,
   Underline, Undo2,
 } from 'lucide-react';
@@ -93,7 +93,7 @@ function TableMenu({ editor, inTable }) {
   );
 }
 
-export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence }) {
+export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc }) {
   const imageInput = useRef(null);
   const fileInput = useRef(null);
 
@@ -180,6 +180,7 @@ export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onI
       </div>
       <div className="tool-group">
         <TableMenu editor={editor} inTable={s.table} />
+        {onInsertCalc && <Btn label="Insérer un calcul (molarité, dilution, tampon…)" onClick={onInsertCalc}><Calculator size={16} /></Btn>}
       </div>
       {canUpload && (
         <div className="tool-group">

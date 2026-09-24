@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Dna, Download, FilePlus2, LayoutTemplate, LogOut, Menu, Plus, Search, X } from 'lucide-react';
+import { BookOpen, Calculator, Dna, Download, FilePlus2, LayoutTemplate, LogOut, Menu, Plus, Search, X } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import ProjectDialog from './ProjectDialog.jsx';
@@ -69,6 +69,7 @@ export default function Sidebar() {
         <nav className="sidebar-nav">
           <NavLink to="/" end className="nav-link"><BookOpen size={16} /> Journal</NavLink>
           <NavLink to="/sequences" className="nav-link"><Dna size={16} /> Séquences</NavLink>
+          <NavLink to="/calc" className="nav-link"><Calculator size={16} /> Calculs</NavLink>
           <NavLink to="/templates" className="nav-link"><LayoutTemplate size={16} /> Modèles</NavLink>
         </nav>
 

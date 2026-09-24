@@ -1,8 +1,8 @@
 # Paillasse
 
 Cahier de labo électronique auto-hébergé, inspiré de Benchling, pensé d'abord pour un usage
-individuel sur le serveur du labo. Cette version 0.1 couvre le socle et le cahier ; le registre
-de constructions, l'inventaire et les outils (séquences, primers, calculs) viendront ensuite.
+individuel sur le serveur du labo. Cette version 0.1 couvre le socle, le cahier, le registre de séquences
+et les calculs de paillasse ; le registre de constructions et l'inventaire viendront ensuite.
 
 ## Ce que fait cette version
 
@@ -52,6 +52,21 @@ de constructions, l'inventaire et les outils (séquences, primers, calculs) vien
   amorces collées aux bornes exactes de la région (clonage) ou paire choisie librement par primer3
   qui l'encadre (vérification, séquençage) ; Tm, GC, épingles et dimères ; ajout direct à la séquence.
   Analyse de n'importe quel oligo.
+- **Calculs de paillasse** (menu « Calculs », reprise de LabHelper) : pesée et molarité, dilution C₁V₁ = C₂V₂
+  (unités molaires, massiques, % et X, avec contrôle des unités incompatibles), tampon ou solution à plusieurs
+  composants (poudres et solutions mères, eau à compléter), 37 milieux de culture mis à l'échelle, master mix
+  avec marge de pipetage et composants ajoutés tube par tube, ADN (masse ↔ moles, ng/µL ↔ nM), ligation
+  (rapport insert / vecteur) et centrifugation (rpm ↔ × g). La longueur d'un ADN peut être reprise d'une
+  séquence du registre. Virgule décimale acceptée partout, résultats en français avec l'unité la plus lisible.
+- **Encart de calcul dans une entrée** : bouton « Calcul » de la barre d'outils, ou « Insérer dans une entrée »
+  depuis la page Calculs. L'encart garde les valeurs saisies et le résultat tel qu'il a été affiché ; il est
+  scellé avec la version, imprimé, exporté et trouvé par la recherche. Modifiable tant que l'entrée est un
+  brouillon (bouton « Modifier » ou double-clic), en lecture seule une fois verrouillée (« Reprendre » rouvre
+  le calcul avec les mêmes valeurs). Utilisable aussi dans les modèles : une recette de tampon qu'on
+  ajuste au volume du jour.
+- **Produits** (onglet de la page Calculs) : 153 produits avec masse molaire, formule, solution mère et
+  concentration d'usage, proposés pendant la saisie (sans tenir compte des accents). On en ajoute, on les
+  corrige, on les archive. Corriger une masse molaire ne change pas les calculs déjà enregistrés.
 - **Modèles** de protocoles, créés à la main ou à partir d'une entrée.
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
@@ -141,7 +156,25 @@ npm run install:all
 npm run dev:server
 # terminal 2 : interface sur :5173 avec rechargement à chaud (proxy /api vers :3070)
 npm run dev:client
+# tests du serveur et des calculs
+npm test
 ```
+
+## Calculs : fiabilité
+
+Les formules sont dans `client/src/lib/calc/` (sans React) et vérifiées par `npm --prefix client test`
+sur des valeurs calculées à la main ou données par les fabricants (Eppendorf 5424 : 84 mm à 15 000 rpm
+= 21 130 × g). Le serveur ne refait pas les calculs : il affiche le résumé enregistré dans l'entrée
+(`server/src/lib/calc.js`), si bien qu'une page verrouillée montre toujours les valeurs du jour.
+
+Corrections par rapport à LabHelper v3 :
+- centrifugation : le rayon saisi en mm était utilisé dans la formule prévue pour des cm, d'où des × g
+  dix fois trop élevés ;
+- base de produits : glycine 75,07 g/mol (et non 75,03), SAM 398,44 (et non 399,44), orthovanadate 183,91 ;
+  polymyxine B et G418 décrits comme les sels (sulfate, disulfate) auxquels correspondent leurs masses molaires ;
+- les produits ajoutés et l'historique n'étaient jamais enregistrés sur le serveur du labo (LabHelper
+  utilisait le stockage des artefacts Claude) : les produits sont maintenant dans PostgreSQL, et l'historique
+  est remplacé par les encarts insérés dans le cahier.
 
 ## Séquences : fiabilité
 
@@ -180,11 +213,15 @@ server/
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
   src/lib/render.js            rendu HTML (impression, export)
-  src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export
+  src/lib/calc.js              encart de calcul : vérification, rendu imprimable, texte de recherche
+  src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits
   scripts/create-user.js       créer un compte ou changer un mot de passe
 client/
   src/pages/EntryPage.jsx      édition d'une entrée : autosave, versions, verrou
   src/components/NoteEditor.jsx  éditeur TipTap, glisser-déposer et collage de fichiers
+  src/lib/calc/                formules des calculs, unités, recettes de milieux (testés : npm test)
+  src/components/calc/         formulaires, encart dans l'éditeur (LabCalcNode), produits
+  src/pages/CalcPage.jsx       page Calculs
 deploy/                        service systemd, sauvegarde et son timer
 ```
 

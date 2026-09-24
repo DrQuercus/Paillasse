@@ -817,3 +817,120 @@ code, .hash { font-family: var(--mono); font-size: .82em; }
 .origin { display: flex; flex-direction: column; gap: .15rem; font-size: .86rem; padding: .5rem .6rem; background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: var(--radius); }
 .origin p { margin: 0; }
 @media (max-width: 860px) { .pcr-primer { grid-template-columns: 1fr; } }
+
+/* =====================================================================
+   Calculs de paillasse : page Calculs, fenêtre d'insertion, encart dans les entrées
+   ===================================================================== */
+.calc-tabs { flex-wrap: wrap; }
+.calc-tab-reagents { margin-left: auto; }
+.calc-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 23rem); gap: 1.5rem; align-items: start; }
+.calc-main { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.35rem 1.4rem; }
+.calc-main h2 { font-size: 1.15rem; font-weight: 600; }
+.calc-desc { margin: .25rem 0 1rem; color: var(--ink-2); font-size: .9rem; }
+.calc-side { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: .75rem; }
+.calc-side .hint { margin: 0; }
+.calc-side-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.calc-waiting { margin: 0; padding: 1rem; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--paper); color: var(--ink-3); font-size: .9rem; }
+
+.calc-form { display: flex; flex-direction: column; gap: .9rem; }
+.calc-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .9rem; }
+.calc-row-product { grid-template-columns: minmax(0, 1fr) minmax(8rem, 11rem); }
+.field-error { color: var(--red); font-size: .8rem; }
+
+/* Valeur + unité dans un même cadre */
+.qty { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.qty:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.qty.is-invalid { border-color: var(--red); }
+.field .qty input, .seq-search .qty input { flex: 1; min-width: 0; width: auto; border: 0; border-radius: var(--radius); background: transparent; }
+.field .qty input:focus { box-shadow: none; }
+.field .qty select { width: auto; border: 0; border-left: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0; background: #F5F7FA; padding: 0 .45rem; font-size: .85rem; }
+.qty-unit { display: grid; place-items: center; padding: 0 .6rem; border-left: 1px solid var(--line); background: #F5F7FA; color: var(--ink-2); font-size: .85rem; white-space: nowrap; }
+.qty-unit:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.qty-btn { display: inline-flex; align-items: center; gap: .3rem; padding: 0 .6rem; border: 0; border-left: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0; background: #fff; color: var(--blue); font-size: .82rem; cursor: pointer; white-space: nowrap; }
+.qty-btn:hover { background: var(--blue-soft); }
+
+/* Produit avec suggestions */
+.combo-box { position: relative; display: block; }
+.combo-list {
+  position: absolute; z-index: 20; left: 0; right: 0; top: 100%; margin: .25rem 0 0; padding: .25rem 0; list-style: none;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 12px 28px -12px rgba(29, 41, 64, .35);
+  max-height: 18rem; overflow-y: auto;
+}
+.combo-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 .75rem; padding: .4rem .7rem; cursor: pointer; font-size: .88rem; }
+.combo-list li.is-active, .combo-list li:hover { background: var(--blue-soft); }
+.combo-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.combo-meta { grid-column: 1; color: var(--ink-3); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-mw { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--ink-2); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.combo-static { position: static; box-shadow: none; }
+.combo-static li { grid-template-columns: auto minmax(0, 1fr) auto; }
+.combo-static .combo-mw { grid-column: 3; grid-row: 1; }
+.seq-search { margin-top: .4rem; }
+
+/* Tampon : un cadre par composant ; master mix : tableau */
+.calc-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75rem; }
+.calc-item { display: flex; flex-direction: column; gap: .6rem; padding: .8rem; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.calc-item-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: start; }
+.calc-item-remove { margin-top: 1.8rem; }
+.calc-add { align-self: flex-start; }
+.calc-group { border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem .9rem .9rem; margin: 0; background: #fff; }
+.calc-group legend { font-size: .82rem; font-weight: 600; padding: 0 .3rem; }
+.calc-about { font-size: .85rem; color: var(--ink-2); }
+.calc-about summary { cursor: pointer; color: var(--blue); }
+.calc-about p { margin: .4rem 0 0; }
+.mix-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.mix-table th { text-align: left; font-weight: 500; font-size: .78rem; color: var(--ink-2); padding: 0 .4rem .3rem 0; }
+.mix-table td { padding: .2rem .4rem .2rem 0; }
+.mix-table input:not([type="checkbox"]) { width: 100%; padding: .4rem .55rem; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.mix-table input.num { width: 6.5rem; text-align: right; }
+.mix-table .mix-check { text-align: center; }
+.mix-table input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--ink); }
+
+/* Fenêtre d'insertion depuis l'éditeur */
+.modal:has(.calc-layout-dialog) { width: min(66rem, 100%); }
+.calc-chooser { margin-bottom: 1rem; }
+.calc-layout-dialog { grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); }
+.calc-preview { position: sticky; top: 0; }
+
+/* Le résultat : aperçu, encart de l'entrée, lecture seule */
+.calc-card {
+  display: flex; flex-direction: column; gap: .5rem; padding: .65rem .9rem .75rem;
+  background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--blue); border-radius: var(--radius);
+  color: var(--ink); font-size: .92rem; line-height: 1.45;
+}
+.calc-card-head { display: flex; align-items: center; gap: .55rem; color: var(--blue); min-height: 30px; }
+.calc-card-title { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .6rem; color: var(--ink); font-weight: 600; }
+.calc-card-label { font-weight: 400; color: var(--ink-2); }
+.calc-card-actions { display: flex; align-items: center; gap: .25rem; }
+.calc-card .btn { color: var(--ink); }
+.calc-pairs { display: flex; flex-wrap: wrap; gap: .35rem 1.4rem; margin: 0; }
+.calc-pairs dt { font-size: .75rem; color: var(--ink-2); }
+.calc-pairs dd { margin: 0; }
+.calc-results { padding-top: .45rem; border-top: 1px dashed var(--line); }
+.calc-results .is-main dd { font-size: 1.2rem; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+.calc-table-wrap { overflow-x: auto; }
+.calc-table, .prose .calc-table { width: 100%; table-layout: auto; border-collapse: collapse; background: none; font-size: .86rem; }
+.calc-table th, .prose .calc-table th { text-align: left; font-weight: 500; font-size: .76rem; color: var(--ink-2); background: none; border: 0; border-bottom: 1px solid var(--line); padding: .25rem .6rem .25rem 0; min-width: 0; }
+.calc-table td, .prose .calc-table td { border: 0; border-bottom: 1px solid #EEF2F6; padding: .25rem .6rem .25rem 0; min-width: 0; vertical-align: top; }
+.calc-table td:not(:first-child) { white-space: nowrap; }
+.calc-note { margin: 0; font-size: .8rem; color: var(--ink-2); }
+.calc-formula { margin: 0; font-family: var(--mono); font-size: .76rem; color: var(--ink-3); }
+.calc-node { margin: .8em 0; }
+.calc-node .calc-card { cursor: default; }
+.ProseMirror-selectednode .calc-card, .calc-node.ProseMirror-selectednode .calc-card { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* Produits */
+.reagents-bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
+.reagents-bar .picker-search { flex: 1; min-width: 14rem; width: auto; margin: 0; }
+.reagents-bar select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.reagents-bar .check { align-items: center; }
+.reagents .hint { margin: 0 0 .75rem; }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; font-weight: 500; color: var(--ink); cursor: pointer; text-align: left; }
+.link-btn:hover { color: var(--blue); text-decoration: underline; }
+.modal-foot-left { margin-right: auto; }
+
+@media (max-width: 860px) {
+  .calc-layout, .calc-layout-dialog { grid-template-columns: minmax(0, 1fr); }
+  .calc-side, .calc-preview { position: static; }
+  .calc-tab-reagents { margin-left: 0; }
+  .calc-row-product { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,4 +1,5 @@
 // Rendu HTML autonome d'un document TipTap (export, impression, PDF via le navigateur)
+import { calcSummary } from './calc.js';
 
 export const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -38,6 +39,22 @@ function cellAttrs(attrs = {}) {
   return a;
 }
 
+/** Encart de calcul : le résumé enregistré, tel qu'il a été vu au moment du calcul. */
+function renderCalc(raw) {
+  const s = calcSummary(raw);
+  const pairs = (items, cls) => (items.length
+    ? `<dl class="${cls}">${items.map((i) => `<div${i.main ? ' class="main"' : ''}><dt>${escapeHtml(i.label)}</dt><dd>${escapeHtml(i.value)}</dd></div>`).join('')}</dl>`
+    : '');
+  const table = s.table
+    ? `<table class="calc-table"><thead><tr>${s.table.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`
+      + `<tbody>${s.table.rows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+    : '';
+  return `<section class="calc"><p class="calc-head"><strong>${escapeHtml(s.title)}</strong>${s.label ? ` — ${escapeHtml(s.label)}` : ''}</p>`
+    + `${pairs(s.inputs, 'calc-inputs')}${table}${pairs(s.results, 'calc-results')}`
+    + `${s.notes.map((n) => `<p class="calc-note">${escapeHtml(n)}</p>`).join('')}`
+    + `${s.formula ? `<p class="calc-formula">${escapeHtml(s.formula)}</p>` : ''}</section>`;
+}
+
 export function renderDoc(doc, options = {}) {
   // Attention : { rewriteUrl: undefined } passé explicitement ne doit pas écraser la valeur par défaut
   const opts = { rewriteUrl: options.rewriteUrl ?? ((u) => u) };
@@ -68,6 +85,7 @@ export function renderDoc(doc, options = {}) {
       }
       case 'sequenceRef':
         return `<p class="seqref">Séquence <strong>${escapeHtml(a.code)}</strong> « ${escapeHtml(a.name)} », version ${Number(a.version)} (${Number(a.length).toLocaleString('fr-FR')} pb, ${a.circular ? 'circulaire' : 'linéaire'})</p>`;
+      case 'labCalc': return renderCalc(a.summary);
       case 'table': return `<table>${children(node)}</table>`;
       case 'tableRow': return `<tr>${children(node)}</tr>`;
       case 'tableHeader': return `<th${cellAttrs(a)}>${children(node)}</th>`;
@@ -96,6 +114,16 @@ const PRINT_CSS = `
   blockquote { border-left: 3px solid #B8C3D0; margin-left: 0; padding-left: 1rem; color: #55607A; }
   ul.tasks { list-style: none; padding-left: 0; } li.task { display: flex; gap: .5rem; } li.task p { margin: 0; }
   .seqref { border: 1px solid #B8C3D0; border-left: 4px solid #22704E; padding: .4rem .7rem; }
+  .calc { border: 1px solid #B8C3D0; border-left: 4px solid #2449C7; padding: .5rem .8rem; margin: 1rem 0; break-inside: avoid; }
+  .calc p { margin: 0; }
+  .calc-head { margin-bottom: .3rem !important; }
+  .calc dl { display: flex; flex-wrap: wrap; gap: .2rem 1.5rem; margin: .3rem 0; font-size: .9rem; }
+  .calc dt { color: #55607A; font-size: .8rem; }
+  .calc dd { margin: 0; }
+  .calc-results .main dd { font-weight: 600; font-size: 1.05rem; }
+  .calc .calc-table { margin: .4rem 0; }
+  .calc-note, .calc-formula { font-size: .8rem; color: #55607A; }
+  .calc-formula { font-family: "IBM Plex Mono", ui-monospace, monospace; }
   footer { margin-top: 2.5rem; border-top: 1px solid #B8C3D0; padding-top: .75rem; font-size: .8rem; color: #55607A; }
   footer code { word-break: break-all; }
   .noprint { position: fixed; top: 1rem; right: 1rem; font: inherit; padding: .4rem .9rem; border: 1px solid #1F2A44; background: #fff; cursor: pointer; }
