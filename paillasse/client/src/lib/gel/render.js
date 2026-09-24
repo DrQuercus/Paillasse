@@ -4,10 +4,11 @@
 import { decodeTiff } from './tiff.js';
 import { signalFn } from './raster.js';
 import { formatSize, sizeAxis } from './calibration.js';
+import { figureStyle } from './figure.js';
 import { laneName } from './model.js';
 import { laneX } from './profile.js';
 
-const FONT = 'Helvetica, Arial, sans-serif';
+const f1 = (x) => Math.round(x * 10) / 10;
 
 /** Ouvre une image de gel : TIFF (8, 16, 32 bits) lu par Paillasse, autres formats par le navigateur. */
 export async function loadGelFile(blob, filename = '') {
@@ -46,9 +47,9 @@ export async function loadGelFile(blob, filename = '') {
 export function signalRange(img, polarity) {
   const sig = signalFn(img, polarity);
   const step = Math.max(1, Math.floor(img.data.length / 150_000));
-  const values = [];
-  for (let i = 0; i < img.data.length; i += step) values.push(sig(img.data[i]));
-  values.sort((a, b) => a - b);
+  const values = new Float32Array(Math.ceil(img.data.length / step));
+  for (let i = 0, k = 0; i < img.data.length; i += step, k += 1) values[k] = sig(img.data[i]);
+  values.sort();
   const lo = values[Math.floor(values.length * 0.005)] ?? 0;
   const hi = values[Math.floor(values.length * 0.998)] ?? 1;
   return { lo, hi: hi > lo ? hi : lo + 1 };
@@ -67,28 +68,34 @@ export function renderToCanvas(img, { polarity, display = {}, darkBands = true, 
   canvas.height = r.h;
   const ctx = canvas.getContext('2d');
   const out = ctx.createImageData(r.w, r.h);
-  const sig = signalFn(img, polarity);
   const { lo, hi } = range ?? signalRange(img, polarity);
   const a = lo + (display.low ?? 0) * (hi - lo);
   const b = lo + (display.high ?? 1) * (hi - lo);
   const span = b - a || 1;
   const gamma = display.gamma ?? 1;
   const invert = Boolean(display.invert);
-  const lut = new Uint8ClampedArray(1024 * 3);
+  // Table de couleurs RGBA écrite d'un bloc (un pixel = un entier 32 bits, octets dans l'ordre de la mémoire)
   // t = force du signal (1 = bande intense) ; « feu » : bandes chaudes sur fond noir, pour voir les bandes faibles
+  const lut = new Uint32Array(1024);
+  const bytes = new Uint8ClampedArray(lut.buffer);
   for (let k = 0; k < 1024; k += 1) {
     const t = (k / 1023) ** gamma;
     const g = darkBands !== invert ? 255 * (1 - t) : 255 * t;
     const [cr, cg, cb] = colormap === 'fire' ? FIRE(t) : [g, g, g];
-    lut[k * 3] = cr; lut[k * 3 + 1] = cg; lut[k * 3 + 2] = cb;
+    bytes[k * 4] = cr; bytes[k * 4 + 1] = cg; bytes[k * 4 + 2] = cb; bytes[k * 4 + 3] = 255;
   }
+  const px = new Uint32Array(out.data.buffer);
+  const { data } = img;
+  const max = img.maxValue || 1;
+  const dark = polarity === 'dark';
+  const k0 = dark ? (max - a) * (1023 / span) : -a * (1023 / span); // indice = k0 ∓ v · 1023 / span
+  const kv = (dark ? -1023 : 1023) / span;
   for (let y = 0; y < r.h; y += 1) {
     const row = (r.y + y) * img.width + r.x;
+    const o = y * r.w;
     for (let x = 0; x < r.w; x += 1) {
-      const t = Math.max(0, Math.min(1, (sig(img.data[row + x]) - a) / span));
-      const k = Math.round(t * 1023) * 3;
-      const o = (y * r.w + x) * 4;
-      out.data[o] = lut[k]; out.data[o + 1] = lut[k + 1]; out.data[o + 2] = lut[k + 2]; out.data[o + 3] = 255;
+      const k = k0 + data[row + x] * kv;
+      px[o + x] = lut[k <= 0 ? 0 : k >= 1023 ? 1023 : (k + 0.5) | 0];
     }
   }
   ctx.putImageData(out, 0, 0);
@@ -102,20 +109,33 @@ export function rawY(profiles, lane, pos) {
   return profiles.warp ? profiles.warp(x, y) : y;
 }
 
-function arrow(ctx, x, y, text, color = '#111') {
-  ctx.fillStyle = color;
+// Repère pointant vers le gel : à droite de l'image (pointe à gauche) ou à gauche (pointe à droite)
+function arrow(ctx, x, y, text, size, side = 'right') {
+  const a = Math.max(5, size * 0.4);
+  ctx.fillStyle = '#111';
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + 10, y - 5);
-  ctx.lineTo(x + 10, y + 5);
+  if (side === 'right') {
+    ctx.moveTo(x, y); ctx.lineTo(x + 2 * a, y - a); ctx.lineTo(x + 2 * a, y + a);
+  } else {
+    ctx.moveTo(x, y); ctx.lineTo(x - 2 * a, y - a); ctx.lineTo(x - 2 * a, y + a);
+  }
   ctx.closePath();
   ctx.fill();
-  ctx.fillText(text, x + 14, y + 5);
+  ctx.textAlign = side === 'right' ? 'left' : 'right';
+  ctx.fillText(text, side === 'right' ? x + 2 * a + 4 : x - 2 * a - 4, y + size * 0.35);
 }
 
-/** Panneau « gel » de la figure : image recadrée, noms des pistes, échelle de tailles, repères. */
-export function drawGelFigure(img, state, profiles, results) {
+// Largeur du gel dans la figure (px) : S, M, L
+export const GEL_SIZES = { S: 600, M: 900, L: 1300 };
+
+/**
+ * Panneau « gel » de la figure : image recadrée, noms des pistes, échelle de tailles, repères.
+ * Options dans state.figure.gel et state.figure.style ; letter = lettre du panneau (A, B…).
+ */
+export function drawGelFigure(img, state, profiles, results, { letter = null } = {}) {
   const opt = state.figure?.gel ?? {};
+  const st = figureStyle(state);
+  const font = (px, bold = false) => `${bold ? 'bold ' : ''}${px}px ${st.font}`;
   const lanes = state.lanes;
   const region = profiles.region;
   const hw = profiles.width / 2;
@@ -129,20 +149,31 @@ export function drawGelFigure(img, state, profiles, results) {
     const y1 = Math.min(img.height, Math.ceil(region.bottom + pad / 2));
     rect = { x: x0, y: y0, w: Math.max(8, x1 - x0), h: Math.max(8, y1 - y0) };
   }
-  const s = rect.w < 520 ? Math.min(4, 520 / rect.w) : rect.w > 1400 ? 1400 / rect.w : 1;
+  const target = GEL_SIZES[opt.size] ?? GEL_SIZES.M;
+  const s = Math.min(4, target / rect.w);
   const iw = Math.round(rect.w * s);
   const ih = Math.round(rect.h * s);
   const measure = document.createElement('canvas').getContext('2d');
-  measure.font = `15px ${FONT}`;
+  const labelSize = f1(st.size * 1.08);
+  measure.font = font(labelSize);
   const names = lanes.map((l, i) => laneName(l, i));
   const labelW = Math.max(0, ...names.map((n) => measure.measureText(n).width));
   const spacing = lanes.length > 1
     ? Math.min(...lanes.slice(1).map((l, i) => Math.abs((l.xTop - lanes[i].xTop) * s)))
     : iw;
-  const rotate = opt.laneLabels !== false && labelW > spacing - 6;
+  const showLabels = opt.laneLabels !== false;
+  const angle = opt.labelAngle === '0' || opt.labelAngle === '45' || opt.labelAngle === '90'
+    ? Number(opt.labelAngle)
+    : labelW > spacing - 6 ? 45 : 0;
+  const labelsBottom = opt.labelSide === 'bottom';
+  const labelBand = !showLabels ? 0 : angle === 0 ? labelSize + 14 : angle === 45 ? 14 + labelW * 0.72 + labelSize * 0.5 : 14 + labelW;
   const cal = results.calibration;
   const ladderLane = results.ladderLane;
   const showScale = opt.sizeScale !== false && cal && ladderLane;
+  const scaleRight = opt.scaleSide === 'right';
+  const axis = showScale ? sizeAxis(cal.points.map((p) => p.size), results.unit) : null;
+  measure.font = font(st.small);
+  const scaleW = showScale ? Math.max(measure.measureText(axis.unit).width, ...cal.points.map((p) => measure.measureText(axis.label(p.size)).width)) + 16 : 0;
   const marks = [];
   if (opt.bandLabels === 'groups') {
     const right = [...results.sampleLanes].sort((a, b) => b.xTop - a.xTop)[0];
@@ -150,13 +181,18 @@ export function drawGelFigure(img, state, profiles, results) {
   }
   const rightLane = [...lanes].sort((a, b) => b.xTop - a.xTop)[0];
   for (const a of state.annotations ?? []) if (rightLane) marks.push({ y: rawY(profiles, rightLane, a.pos), text: a.text });
-  measure.font = `14px ${FONT}`;
-  const markW = Math.max(0, ...marks.map((m) => measure.measureText(m.text).width));
-  const top = opt.laneLabels === false ? 12 : rotate ? 16 + labelW * 0.72 : 32;
-  const left = showScale ? 74 : 12;
-  const right = marks.length ? 26 + markW : 12;
-  const W = Math.round(left + iw + right);
-  const H = Math.round(top + ih + 12);
+  measure.font = font(st.size);
+  const markW = marks.length ? Math.max(...marks.map((m) => measure.measureText(m.text).width)) + st.size * 0.8 + 16 : 0;
+  // Échelle à gauche, repères à droite (ou l'inverse)
+  const leftW = (scaleRight ? markW : scaleW) || 12;
+  const rightW = (scaleRight ? scaleW : markW) || 12;
+  const letterW = letter ? st.size * 1.6 : 0;
+  const unitH = showScale ? st.small + 12 : 0;
+  const top = Math.max(labelsBottom ? 12 : labelBand, unitH, letter ? st.size * 1.6 : 0, 12);
+  const bottom = labelsBottom ? Math.max(labelBand, 12) : 12;
+  const left = Math.round(letterW + leftW);
+  const W = Math.round(left + iw + rightW);
+  const H = Math.round(top + ih + bottom);
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -165,10 +201,13 @@ export function drawGelFigure(img, state, profiles, results) {
   ctx.fillRect(0, 0, W, H);
   const base = renderToCanvas(img, { polarity: profiles.polarity, display: state.display, darkBands: opt.darkBands !== false, rect });
   ctx.imageSmoothingEnabled = s < 1;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(base, left, top, iw, ih);
-  ctx.strokeStyle = '#222';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(left + 0.5, top + 0.5, iw - 1, ih - 1);
+  if (opt.frame !== false) {
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(left + 0.5, top + 0.5, iw - 1, ih - 1);
+  }
   const X = (x) => left + (x - rect.x) * s;
   const Y = (y) => top + (y - rect.y) * s;
   const light = opt.darkBands === false;
@@ -176,6 +215,7 @@ export function drawGelFigure(img, state, profiles, results) {
   // Pistes
   if (opt.overlay && opt.overlay !== 'none') {
     ctx.strokeStyle = light ? 'rgba(255,255,255,.75)' : 'rgba(0,0,0,.55)';
+    ctx.lineWidth = Math.max(1, st.line * 0.7);
     ctx.setLineDash(opt.overlay === 'lines' ? [5, 4] : []);
     for (const l of lanes) {
       ctx.beginPath();
@@ -192,8 +232,8 @@ export function drawGelFigure(img, state, profiles, results) {
   }
   // Tailles attendues : tirets sur la piste concernée
   if (opt.expected && cal) {
-    ctx.strokeStyle = '#D55E00';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = st.gray ? (light ? '#fff' : '#000') : '#D55E00';
+    ctx.lineWidth = Math.max(1.5, st.line * 1.2);
     ctx.setLineDash([4, 3]);
     for (const lane of results.lanes) {
       for (const e of lane.expected ?? []) {
@@ -205,49 +245,60 @@ export function drawGelFigure(img, state, profiles, results) {
       }
     }
     ctx.setLineDash([]);
-    ctx.lineWidth = 1;
   }
-  // Noms des pistes
-  if (opt.laneLabels !== false) {
+  ctx.lineWidth = 1;
+  // Noms des pistes, au-dessus ou au-dessous du gel, droits, inclinés ou verticaux
+  if (showLabels) {
     ctx.fillStyle = '#111';
-    ctx.font = `15px ${FONT}`;
+    ctx.font = font(labelSize);
     lanes.forEach((l, i) => {
-      const x = X(l.xTop);
-      if (rotate) {
-        ctx.save();
-        ctx.translate(x + 4, top - 6);
-        ctx.rotate(-Math.PI / 4);
-        ctx.textAlign = 'left';
-        ctx.fillText(names[i], 0, 0);
-        ctx.restore();
-      } else {
+      const x = X(labelsBottom ? l.xBot : l.xTop);
+      const y = labelsBottom ? top + ih + 8 : top - 8;
+      ctx.save();
+      ctx.translate(x, y);
+      if (angle === 0) {
         ctx.textAlign = 'center';
-        ctx.fillText(names[i], x, top - 10);
+        ctx.fillText(names[i], 0, labelsBottom ? labelSize * 0.9 : -2);
+      } else {
+        // Texte qui monte depuis le gel (en haut) ou qui descend (en bas)
+        ctx.rotate((labelsBottom ? 1 : -1) * (angle * Math.PI) / 180);
+        ctx.textAlign = 'left';
+        ctx.fillText(names[i], 2, labelSize * 0.35);
       }
+      ctx.restore();
     });
   }
   // Échelle de tailles, lue sur la piste du marqueur
   if (showScale) {
     ctx.fillStyle = '#111';
     ctx.strokeStyle = '#111';
-    ctx.font = `13px ${FONT}`;
-    ctx.textAlign = 'right';
-    const axis = sizeAxis(cal.points.map((p) => p.size), results.unit);
+    ctx.font = font(st.small);
+    ctx.textAlign = scaleRight ? 'left' : 'right';
+    const edge = scaleRight ? left + iw : left;
+    const dir = scaleRight ? 1 : -1;
     for (const p of cal.points) {
       const y = Y(rawY(profiles, ladderLane, p.pos));
       if (y < top - 2 || y > top + ih + 2) continue;
-      ctx.beginPath(); ctx.moveTo(left - 7, y); ctx.lineTo(left, y); ctx.stroke();
-      ctx.fillText(axis.label(p.size), left - 10, y + 4);
+      ctx.beginPath(); ctx.moveTo(edge + dir * 6, y); ctx.lineTo(edge, y); ctx.stroke();
+      ctx.fillText(axis.label(p.size), edge + dir * 9, y + st.small * 0.35);
     }
-    ctx.font = `bold 13px ${FONT}`;
-    ctx.fillText(axis.unit, left - 10, Math.max(14, top - 10));
+    ctx.font = font(st.small, true);
+    ctx.fillText(axis.unit, edge + dir * 9, Math.max(st.small + 2, top - 8));
   }
-  // Repères à droite (bandes, annotations)
-  ctx.font = `14px ${FONT}`;
-  ctx.textAlign = 'left';
+  // Repères (tailles des bandes, flèches), du côté opposé à l'échelle
+  ctx.font = font(st.size);
   for (const m of marks) {
     const y = Y(m.y);
-    if (y >= top - 2 && y <= top + ih + 2) arrow(ctx, left + iw + 4, y, m.text);
+    if (y >= top - 2 && y <= top + ih + 2) {
+      if (scaleRight) arrow(ctx, left - 4, y, m.text, st.size, 'left');
+      else arrow(ctx, left + iw + 4, y, m.text, st.size, 'right');
+    }
+  }
+  if (letter) {
+    ctx.fillStyle = '#111';
+    ctx.font = font(f1(st.size * 1.35), true);
+    ctx.textAlign = 'left';
+    ctx.fillText(letter, 4, st.size * 1.35);
   }
   return canvas;
 }

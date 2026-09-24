@@ -3,7 +3,8 @@ import { Crosshair, Dna, Hand, Plus, Trash2, Wand2 } from 'lucide-react';
 import { api } from '../../api.js';
 import { formatNumber } from '../../lib/calc/units.js';
 import { FIT_METHODS, formatSize } from '../../lib/gel/calibration.js';
-import { calibrationSvg } from '../../lib/gel/figure.js';
+import { UI_STYLE, calibrationSvg } from '../../lib/gel/figure.js';
+import { rememberLadder } from '../../lib/gel/draft.js';
 import { MODES, VALUE_MODES, laneName, newId, suggestCalibration } from '../../lib/gel/model.js';
 import { proteinsOf } from '../../lib/gel/protein.js';
 import Modal from '../Modal.jsx';
@@ -12,50 +13,71 @@ import { ladderSnapshot } from './useLadders.js';
 
 const parseList = (s) => String(s).split(/[;,\s]+/).map((x) => Number(x.replace(',', '.'))).filter((x) => x > 0);
 
-export function StepSizes({ ctx }) {
-  const { state, update, profiles, results, ladders, tool, setTool, calibSize, setCalibSize, openLadders } = ctx;
+/** Choix du marqueur et de sa piste, attribution automatique, méthode d'ajustement. */
+export function LadderControls({ ctx, compact = false }) {
+  const { state, update, results, ladders, openLadders } = ctx;
   const mode = MODES[state.mode];
   const cal = state.calibration;
   const available = (ladders ?? []).filter((l) => l.kind === mode.ladderKind && !l.archived);
-  const ladderLane = state.lanes.find((l) => l.id === cal.laneId);
   const setCal = (patch) => update((s) => ({ ...s, calibration: { ...s.calibration, ...patch } }));
-
   const chooseLadder = (id) => {
     const l = available.find((x) => x.id === id);
     if (!l) return setCal({ ladder: null, points: [] });
     const snap = ladderSnapshot(l);
-    const points = results ? suggestCalibration(results, snap) : [];
-    setCal({ ladder: snap, points });
+    rememberLadder(mode.ladderKind, l.id);
+    return setCal({ ladder: snap, points: results ? suggestCalibration(results, snap) : [] });
   };
   const setLadderLane = (id) => update((s) => ({
     ...s,
     lanes: s.lanes.map((l) => (l.id === id ? { ...l, role: 'ladder' } : l.role === 'ladder' ? { ...l, role: 'sample' } : l)),
     calibration: { ...s.calibration, laneId: id || null, points: [] },
   }));
+  return (
+    <>
+      <label className="field">
+        <span>Marqueur</span>
+        <select value={cal.ladder?.id ?? ''} onChange={(e) => chooseLadder(e.target.value)}>
+          <option value="">— Choisir —</option>
+          {cal.ladder && !available.some((l) => l.id === cal.ladder.id) && <option value={cal.ladder.id}>{cal.ladder.name}</option>}
+          {available.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      </label>
+      {!compact && <button type="button" className="link-btn small" onClick={openLadders}>Gérer les marqueurs…</button>}
+      <label className="field">
+        <span>Piste du marqueur</span>
+        <select value={cal.laneId ?? ''} onChange={(e) => setLadderLane(e.target.value)}>
+          <option value="">— Aucune —</option>
+          {state.lanes.map((l, i) => <option key={l.id} value={l.id}>Piste {laneName(l, i)}</option>)}
+        </select>
+      </label>
+      {compact && cal.ladder && cal.laneId && (
+        <div className="gel-btn-row">
+          <button type="button" className="btn btn-small" onClick={() => setCal({ points: suggestCalibration(results, cal.ladder) })}><Wand2 size={15} /> Réattribuer</button>
+          {results?.calibration && <span className="muted small">{results.calibration.points.length} bandes{results.calibration.method !== 'interp' ? `, R² = ${formatNumber(results.calibration.r2, 4)}` : ''}</span>}
+        </div>
+      )}
+      {results?.calibration && (
+        <Segmented label="Méthode" value={cal.method} onChange={(method) => setCal({ method })} options={Object.entries(FIT_METHODS).map(([k, v]) => [k, v.replace('Interpolation entre marqueurs', 'Interpolation').replace('Régression linéaire', 'Linéaire').replace('Polynôme de degré 2', 'Polynôme')])} />
+      )}
+    </>
+  );
+}
+
+export function StepSizes({ ctx }) {
+  const { state, update, profiles, results, tool, setTool, calibSize, setCalibSize } = ctx;
+  const mode = MODES[state.mode];
+  const cal = state.calibration;
+  const ladderLane = state.lanes.find((l) => l.id === cal.laneId);
+  const setCal = (patch) => update((s) => ({ ...s, calibration: { ...s.calibration, ...patch } }));
   const auto = () => setCal({ points: suggestCalibration(results, cal.ladder) });
   const pointOf = (size) => cal.points.find((p) => p.size === size);
   const fitted = results?.calibration?.points ?? [];
-  const svg = results?.calibration && profiles ? calibrationSvg(state, profiles, results, { width: 460, height: 280 }) : null;
+  const svg = results?.calibration && profiles ? calibrationSvg(state, profiles, results, { width: 460, height: 280, style: UI_STYLE }) : null;
 
   return (
     <>
       <Section title="Marqueur de taille">
-        <label className="field">
-          <span>Marqueur</span>
-          <select value={cal.ladder?.id ?? ''} onChange={(e) => chooseLadder(e.target.value)}>
-            <option value="">— Choisir —</option>
-            {cal.ladder && !available.some((l) => l.id === cal.ladder.id) && <option value={cal.ladder.id}>{cal.ladder.name}</option>}
-            {available.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </label>
-        <button type="button" className="link-btn small" onClick={openLadders}>Gérer les marqueurs…</button>
-        <label className="field">
-          <span>Piste du marqueur</span>
-          <select value={cal.laneId ?? ''} onChange={(e) => setLadderLane(e.target.value)}>
-            <option value="">— Choisir —</option>
-            {state.lanes.map((l, i) => <option key={l.id} value={l.id}>Piste {laneName(l, i)}</option>)}
-          </select>
-        </label>
+        <LadderControls ctx={ctx} />
         {!state.lanes.length && <p className="gel-note">Placez d’abord les pistes (étape 2).</p>}
       </Section>
 
@@ -94,9 +116,8 @@ export function StepSizes({ ctx }) {
 
       {results?.calibration && (
         <Section title="Courbe d’étalonnage">
-          <Segmented label="Méthode" value={cal.method} onChange={(method) => setCal({ method })} options={Object.entries(FIT_METHODS).map(([k, v]) => [k, v.replace('Interpolation entre marqueurs', 'Interpolation').replace('Régression linéaire', 'Linéaire').replace('Polynôme de degré 2', 'Polynôme')])} />
           <p className="hint">
-            {cal.method === 'interp' ? 'Passe par chaque marqueur : recommandé pour l’ADN, dont la migration n’est pas log-linéaire.'
+            {cal.method === 'interp' ? 'Interpolation : passe par chaque marqueur, recommandé pour l’ADN, dont la migration n’est pas log-linéaire.'
               : `R² = ${formatNumber(results.calibration.r2, 4)} sur log(taille). ${results.calibration.r2 < 0.98 ? 'Essayez l’interpolation.' : ''}`}
           </p>
           {/* SVG construit par figure.js à partir de nombres et de textes échappés */}
@@ -220,14 +241,79 @@ function ExpectedDialog({ state, onAdd, onClose }) {
   );
 }
 
+/** Détection des bandes : sensibilité, fond, corrections à la main. */
+export function DetectionControls({ ctx, compact = false }) {
+  const { state, update, tool, setTool, activeLaneId } = ctx;
+  const d = state.detection;
+  const setDet = (patch, opts) => update((s) => ({ ...s, detection: { ...s.detection, ...patch } }), opts);
+  const activeEdits = state.edits?.[activeLaneId];
+  return (
+    <>
+      <Range label="Sensibilité" value={d.sensitivity} min={0.05} max={0.98} step={0.01} format={(v) => `${Math.round(v * 100)} %`} onChange={(sensitivity) => setDet({ sensitivity }, { key: 'sens' })} hint={compact ? null : 'Plus haut : bandes faibles détectées, mais aussi du bruit.'} />
+      <Segmented label="Fond" value={d.background} onChange={(background) => setDet({ background })} options={[['rollingball', 'Rolling ball'], ['valley', 'Vallée à vallée'], ['min', 'Minimum']]} />
+      {d.background === 'rollingball' && (
+        <Range label="Rayon" value={d.radius ?? ctx.profiles?.scales.radius ?? 30} min={4} max={Math.max(40, Math.round((ctx.profiles?.length ?? 400) / 3))} format={(v) => `${v} px`} onChange={(radius) => setDet({ radius }, { key: 'radius' })} hint={compact ? null : 'Plus grand que la largeur des bandes.'} />
+      )}
+      <div className="gel-btn-row">
+        <button type="button" className={`btn btn-small${tool === 'band' ? ' is-on' : ''}`} onClick={() => setTool(tool === 'band' ? 'select' : 'band')}>
+          <Hand size={15} /> {tool === 'band' ? 'Cliquez sur une bande…' : 'Corriger à la main'}
+        </button>
+        {activeEdits && (activeEdits.added?.length || activeEdits.removed?.length || activeEdits.bounds?.length) ? (
+          <button type="button" className="btn btn-small btn-ghost" onClick={() => update((s) => { const e = { ...s.edits }; delete e[activeLaneId]; return { ...s, edits: e }; })}>
+            Annuler les corrections de la piste
+          </button>
+        ) : null}
+      </div>
+      {tool === 'band' && <p className="gel-note">Cliquez sur une bande pour la retirer, à côté d’une bande non détectée pour l’ajouter (sur le gel ou sur le profil).</p>}
+    </>
+  );
+}
+
+/** Valeurs du tableau : aire, %, référence, contrôle de charge, quantité. */
+export function QuantControls({ ctx }) {
+  const { state, update, results } = ctx;
+  const q = state.quant;
+  const setQuant = (patch) => update((s) => ({ ...s, quant: { ...s.quant, ...patch } }));
+  const groups = results?.rows ?? [];
+  const groupRef = (row) => ({ pos: row.group.pos, size: row.group.size });
+  const selectedGroup = (ref) => (ref ? groups.findIndex((r) => (ref.size && r.group.size ? Math.abs(Math.log(r.group.size / ref.size)) < 0.06 : Math.abs(r.group.pos - ref.pos) < 12)) : -1);
+  const sampleLanes = state.lanes.filter((l) => l.role !== 'ladder');
+  return (
+    <>
+      <label className="field">
+        <span>Valeurs du tableau</span>
+        <select value={q.values} onChange={(e) => setQuant({ values: e.target.value })}>
+          {Object.entries(VALUE_MODES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+      </label>
+      {(q.values === 'relative' || q.values === 'normalized') && (
+        <label className="field">
+          <span>Piste de référence (= 100 % ou 1)</span>
+          <select value={q.referenceLane ?? ''} onChange={(e) => setQuant({ referenceLane: e.target.value || null })}>
+            <option value="">{q.values === 'normalized' ? 'Aucune (rapport brut)' : '— Choisir —'}</option>
+            {sampleLanes.map((l) => <option key={l.id} value={l.id}>Piste {laneName(l, state.lanes.indexOf(l))}</option>)}
+          </select>
+        </label>
+      )}
+      {q.values === 'normalized' && (
+        <label className="field">
+          <span>Contrôle de charge</span>
+          <select value={selectedGroup(q.loadingControl)} onChange={(e) => setQuant({ loadingControl: Number(e.target.value) >= 0 ? groupRef(groups[Number(e.target.value)]) : null })}>
+            <option value={-1}>— Bande de référence (actine, GAPDH…) —</option>
+            {groups.map((r, i) => <option key={r.group.pos} value={i}>{r.label}</option>)}
+          </select>
+        </label>
+      )}
+    </>
+  );
+}
+
 export function StepBands({ ctx }) {
-  const { state, update, results, tool, setTool, activeLaneId } = ctx;
+  const { state, update, results } = ctx;
   const [addingExpected, setAddingExpected] = useState(false);
   const mode = MODES[state.mode];
-  const d = state.detection;
   const q = state.quant;
   const st = q.standards;
-  const setDet = (patch, opts) => update((s) => ({ ...s, detection: { ...s.detection, ...patch } }), opts);
   const setQuant = (patch) => update((s) => ({ ...s, quant: { ...s.quant, ...patch } }));
   const setStd = (patch) => update((s) => ({ ...s, quant: { ...s.quant, standards: { ...s.quant.standards, ...patch } } }), { key: 'std' });
   const groups = results?.rows ?? [];
@@ -235,56 +321,17 @@ export function StepBands({ ctx }) {
   const selectedGroup = (ref) => (ref ? groups.findIndex((r) => (ref.size && r.group.size ? Math.abs(Math.log(r.group.size / ref.size)) < 0.06 : Math.abs(r.group.pos - ref.pos) < 12)) : -1);
   const sampleLanes = state.lanes.filter((l) => l.role !== 'ladder');
   const ladderHasMasses = state.calibration.ladder?.bands?.some((b) => b.mass > 0);
-  const activeEdits = state.edits?.[activeLaneId];
   const autoStd = results?.standardAuto ? groups.find((r) => r.group === results.standardGroup) : null;
   const presence = (r) => { const n = Object.keys(r.group.members).length; return `${n} piste${n > 1 ? 's' : ''}`; };
 
   return (
     <>
       <Section title="Détection des bandes">
-        <Range label="Sensibilité" value={d.sensitivity} min={0.05} max={0.98} step={0.01} format={(v) => `${Math.round(v * 100)} %`} onChange={(sensitivity) => setDet({ sensitivity }, { key: 'sens' })} hint="Plus haut : bandes faibles détectées, mais aussi du bruit." />
-        <Segmented label="Fond" value={d.background} onChange={(background) => setDet({ background })} options={[['rollingball', 'Rolling ball'], ['valley', 'Vallée à vallée'], ['min', 'Minimum']]} />
-        {d.background === 'rollingball' && (
-          <Range label="Rayon" value={d.radius ?? ctx.profiles?.scales.radius ?? 30} min={4} max={Math.max(40, Math.round((ctx.profiles?.length ?? 400) / 3))} format={(v) => `${v} px`} onChange={(radius) => setDet({ radius }, { key: 'radius' })} hint="Plus grand que la largeur des bandes." />
-        )}
-        <div className="gel-btn-row">
-          <button type="button" className={`btn btn-small${tool === 'band' ? ' is-on' : ''}`} onClick={() => setTool(tool === 'band' ? 'select' : 'band')}>
-            <Hand size={15} /> {tool === 'band' ? 'Cliquez sur une bande…' : 'Corriger à la main'}
-          </button>
-          {activeEdits && (activeEdits.added?.length || activeEdits.removed?.length) ? (
-            <button type="button" className="btn btn-small btn-ghost" onClick={() => update((s) => { const e = { ...s.edits }; delete e[activeLaneId]; return { ...s, edits: e }; })}>
-              Annuler les corrections de la piste
-            </button>
-          ) : null}
-        </div>
-        {tool === 'band' && <p className="gel-note">Cliquez sur une bande pour la retirer, à côté d’une bande non détectée pour l’ajouter (sur le gel ou sur le profil).</p>}
+        <DetectionControls ctx={ctx} />
       </Section>
 
       <Section title="Quantification">
-        <label className="field">
-          <span>Valeurs du tableau</span>
-          <select value={q.values} onChange={(e) => setQuant({ values: e.target.value })}>
-            {Object.entries(VALUE_MODES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-        </label>
-        {(q.values === 'relative' || q.values === 'normalized') && (
-          <label className="field">
-            <span>Piste de référence (= 100 % ou 1)</span>
-            <select value={q.referenceLane ?? ''} onChange={(e) => setQuant({ referenceLane: e.target.value || null })}>
-              <option value="">{q.values === 'normalized' ? 'Aucune (rapport brut)' : '— Choisir —'}</option>
-              {sampleLanes.map((l) => <option key={l.id} value={l.id}>Piste {laneName(l, state.lanes.indexOf(l))}</option>)}
-            </select>
-          </label>
-        )}
-        {q.values === 'normalized' && (
-          <label className="field">
-            <span>Contrôle de charge</span>
-            <select value={selectedGroup(q.loadingControl)} onChange={(e) => setQuant({ loadingControl: Number(e.target.value) >= 0 ? groupRef(groups[Number(e.target.value)]) : null })}>
-              <option value={-1}>— Bande de référence (actine, GAPDH…) —</option>
-              {groups.map((r, i) => <option key={r.group.pos} value={i}>{r.label}</option>)}
-            </select>
-          </label>
-        )}
+        <QuantControls ctx={ctx} />
       </Section>
 
       <Section title="Gamme étalon" open={st.source !== 'none'}>

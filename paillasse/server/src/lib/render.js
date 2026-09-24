@@ -1,6 +1,6 @@
 // Rendu HTML autonome d'un document TipTap (export, impression, PDF via le navigateur)
 import { calcSummary } from './calc.js';
-import { gelImages, gelSummary } from './gel.js';
+import { gelImages, gelLayout, gelSummary, panelWidths } from './gel.js';
 
 export const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -60,13 +60,15 @@ function renderCalc(raw) {
 function renderGel(attrs, rewriteUrl) {
   const s = gelSummary(attrs?.summary);
   const width = [25, 50, 75, 100].includes(Number(attrs?.width)) ? Number(attrs.width) : 100;
-  const images = gelImages(attrs?.images)
-    .map((i) => `<img src="${escapeHtml(rewriteUrl(safeUrl(i.src)))}" alt="${escapeHtml(i.alt)}" data-panel="${escapeHtml(i.panel)}">`).join('');
+  const list = gelImages(attrs?.images);
+  const widths = panelWidths(list.map((i) => i.width), gelLayout(attrs?.layout));
+  const images = list
+    .map((i, k) => `<img src="${escapeHtml(rewriteUrl(safeUrl(i.src)))}" alt="${escapeHtml(i.alt)}" data-panel="${escapeHtml(i.panel)}" style="width:${widths[k]}%">`).join('');
   const table = s.table
     ? `<table class="calc-table"><thead><tr>${s.table.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`
       + `<tbody>${s.table.rows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
     : '';
-  return `<figure class="gelfig gelfig-${attrs?.layout === 'row' ? 'row' : 'column'}"${width < 100 ? ` style="width:${width}%"` : ''}>`
+  return `<figure class="gelfig gelfig-${gelLayout(attrs?.layout)}"${width < 100 ? ` style="width:${width}%"` : ''}>`
     + `<figcaption><strong>${escapeHtml(s.title)}</strong>${s.mode ? ` — ${escapeHtml(s.mode)}` : ''}${s.lanes.length ? `<br>Pistes : ${escapeHtml(s.lanes.join(', '))}` : ''}</figcaption>`
     + `<div class="gelfig-panels">${images}</div>${table}`
     + `${s.notes.map((n) => `<p class="calc-note">${escapeHtml(n)}</p>`).join('')}</figure>`;
@@ -144,10 +146,9 @@ const PRINT_CSS = `
   .calc-formula { font-family: "IBM Plex Mono", ui-monospace, monospace; }
   .gelfig { border: 1px solid #B8C3D0; border-left: 4px solid #8F5A06; padding: .5rem .8rem; margin: 1rem 0; }
   .gelfig figcaption { font-size: .9rem; margin-bottom: .4rem; }
-  .gelfig-panels { display: flex; flex-direction: column; gap: .6rem; }
-  .gelfig-row .gelfig-panels { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
-  .gelfig-row .gelfig-panels img { flex: 1 1 18rem; min-width: 0; }
-  .gelfig img { max-width: 100%; height: auto; break-inside: avoid; }
+  .gelfig-panels { display: flex; flex-direction: column; align-items: flex-start; gap: .6rem; }
+  .gelfig-row .gelfig-panels, .gelfig-grid .gelfig-panels { flex-direction: row; flex-wrap: wrap; gap: .6rem 0; }
+  .gelfig img { flex: none; max-width: 100%; height: auto; break-inside: avoid; }
   footer { margin-top: 2.5rem; border-top: 1px solid #B8C3D0; padding-top: .75rem; font-size: .8rem; color: #55607A; }
   footer code { word-break: break-all; }
   .noprint { position: fixed; top: 1rem; right: 1rem; font: inherit; padding: .4rem .9rem; border: 1px solid #1F2A44; background: #fff; cursor: pointer; }

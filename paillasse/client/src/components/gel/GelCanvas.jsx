@@ -14,7 +14,7 @@ const CURSORS = { select: 'grab', addLane: 'crosshair', crop: 'crosshair', warp:
  */
 export default function GelCanvas({
   img, base, state, profiles, results, tool = 'select', activeLaneId, onSelectLane, hoverPos, onHover,
-  showRegion = true, showBands = false, showGrid = false, cropRect = null, activeWarpId = null,
+  showRegion = true, showBands = false, showGrid = false, cropRect = null, activeWarpId = null, previewRotation = 0,
   onLaneAdd, onLaneChange, onRegionChange, onDragEnd, onCrop, onWarpPoint, onPick, onAnnotate,
 }) {
   const wrap = useRef(null);
@@ -53,16 +53,28 @@ export default function GelCanvas({
     const c = canvas.current;
     if (!c || !view || !base) return;
     const dpr = window.devicePixelRatio || 1;
-    c.width = size.w * dpr;
-    c.height = size.h * dpr;
-    c.style.width = `${size.w}px`;
-    c.style.height = `${size.h}px`;
+    // Redimensionner un canvas le réalloue : seulement quand la vue change de taille
+    if (c.width !== Math.round(size.w * dpr) || c.height !== Math.round(size.h * dpr)) {
+      c.width = Math.round(size.w * dpr);
+      c.height = Math.round(size.h * dpr);
+      c.style.width = `${size.w}px`;
+      c.style.height = `${size.h}px`;
+    }
     const ctx = c.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size.w, size.h);
     const { scale: s, x: ox, y: oy } = view;
     ctx.imageSmoothingEnabled = s < 1;
-    ctx.drawImage(base, ox, oy, img.width * s, img.height * s);
+    if (previewRotation) {
+      // Aperçu du redressement : l'image affichée tourne, le calcul suivra au relâchement du curseur
+      ctx.save();
+      ctx.translate(ox + (img.width * s) / 2, oy + (img.height * s) / 2);
+      ctx.rotate((previewRotation * Math.PI) / 180);
+      ctx.drawImage(base, (-img.width * s) / 2, (-img.height * s) / 2, img.width * s, img.height * s);
+      ctx.restore();
+    } else {
+      ctx.drawImage(base, ox, oy, img.width * s, img.height * s);
+    }
     const X = (x) => ox + x * s;
     const Y = (y) => oy + y * s;
     const px = (n) => n; // épaisseurs en pixels d'écran
@@ -198,7 +210,7 @@ export default function GelCanvas({
       ctx.strokeStyle = '#DC2626'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x - hw * s - 14, y); ctx.lineTo(x + hw * s + 14, y); ctx.stroke();
     }
-  }, [base, img, view, size, state, profiles, results, tool, activeLaneId, hoverPos, showRegion, showBands, showGrid, draftCrop, cropRect, activeWarpId, region, hw]);
+  }, [base, img, view, size, state, profiles, results, tool, activeLaneId, hoverPos, showRegion, showBands, showGrid, draftCrop, cropRect, activeWarpId, region, hw, previewRotation]);
 
   // --- Souris ---------------------------------------------------------------------------------
   const hit = (p) => {

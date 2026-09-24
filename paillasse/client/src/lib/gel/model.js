@@ -5,7 +5,7 @@
 
 import { formatNumber } from '../calc/units.js';
 import { detectPolarity, imageStats } from './raster.js';
-import { analyseProfile, defaultScales, laneProfile, makeWarp, saturationOf } from './profile.js';
+import { analyseProfile, bandSaturation, defaultScales, laneScan, makeWarp } from './profile.js';
 import { autoAssign, fitCalibration, formatSize } from './calibration.js';
 import { findGroup, fitStandard, groupBands, matchExpected, stoichiometry } from './quant.js';
 
@@ -64,12 +64,54 @@ export function newAnalysis(mode = 'protein') {
     expected: [],
     bandNames: [],
     display: { low: null, high: null, invert: false, colormap: 'gray' },
+    figure: figureDefaults(m),
+  };
+}
+
+export const PANEL_ORDER = ['gel', 'profiles', 'calibration', 'standards'];
+
+function figureDefaults(m) {
+  return {
+    panels: { gel: true, profiles: true, table: true, calibration: false, standards: false },
+    order: [...PANEL_ORDER],
+    layout: 'column',
+    width: 100,
+    style: { font: 'sans', fontSize: 14, lineWidth: 1.6, letters: false, colors: 'color' },
+    gel: {
+      overlay: 'none', laneLabels: true, labelAngle: 'auto', labelSide: 'top', sizeScale: true, scaleSide: 'left',
+      bandLabels: 'none', expected: false, darkBands: m.darkFigure, cropToLanes: true, frame: true, size: 'M',
+    },
+    profiles: {
+      lanes: null, axis: 'size', baseline: true, areas: true, labels: true, mode: 'overlay', normalize: 'none',
+      smooth: false, legend: 'inside', grid: false, width: 900, height: 380,
+    },
+  };
+}
+
+/**
+ * Analyse enregistrée par une version précédente (encart déjà inséré, brouillon) : les réglages
+ * apparus depuis prennent leur valeur par défaut, ceux déjà choisis sont gardés.
+ */
+export function normalizeAnalysis(state) {
+  const m = MODES[state.mode] ?? MODES.protein;
+  const d = figureDefaults(m);
+  const f = state.figure ?? {};
+  const order = [...(f.order ?? []).filter((k) => PANEL_ORDER.includes(k)), ...PANEL_ORDER.filter((k) => !(f.order ?? []).includes(k))];
+  return {
+    ...newAnalysis(state.mode),
+    ...state,
+    edits: state.edits ?? {},
+    expected: state.expected ?? [],
+    bandNames: state.bandNames ?? [],
+    annotations: state.annotations ?? [],
     figure: {
-      panels: { gel: true, profiles: true, table: true, calibration: false, standards: false },
-      gel: { overlay: 'none', laneLabels: true, sizeScale: true, bandLabels: 'none', expected: false, darkBands: m.darkFigure, cropToLanes: true },
-      profiles: { lanes: null, axis: 'size', baseline: true, areas: true, labels: true },
-      layout: 'column',
-      width: 100,
+      ...d,
+      ...f,
+      order,
+      panels: { ...d.panels, ...f.panels },
+      style: { ...d.style, ...f.style },
+      gel: { ...d.gel, ...f.gel },
+      profiles: { ...d.profiles, ...f.profiles },
     },
   };
 }
@@ -104,30 +146,64 @@ export const laneName = (lane, i) => lane.name?.trim() || String(i + 1);
 // --- Calcul ---------------------------------------------------------------------------------------
 
 /**
- * Profils, bandes et aires de toutes les pistes (partie coûteuse : dépend de l'image).
- * img = image de travail (préparée).
+ * Mémoire des calculs, à garder d'un appel à l'autre pour une même image de travail :
+ * déplacer une piste ne relit que cette piste, changer la sensibilité ne relit aucune piste.
  */
-export function computeProfiles(img, state) {
-  const polarity = state.polarity === 'auto' ? detectPolarity(img) : state.polarity;
+export function createProfileCache() {
+  return { img: null, image: null, scans: new Map(), analyses: new Map() };
+}
+
+function remember(map, key, compute) {
+  if (map.has(key)) return map.get(key);
+  const value = compute();
+  map.set(key, value);
+  if (map.size > 160) map.delete(map.keys().next().value); // les plus anciennes (pistes glissées)
+  return value;
+}
+
+/**
+ * Profils, bandes et aires de toutes les pistes (partie coûteuse : dépend de l'image).
+ * img = image de travail (préparée) ; cache = createProfileCache(), facultatif.
+ */
+/** Statistiques et sens des bandes de l'image de travail (calculés une fois par image). */
+export function imageInfo(img, cache) {
+  if (cache.img !== img) {
+    cache.img = img;
+    const stats = imageStats(img);
+    cache.image = { stats, polarity: detectPolarity(img, stats) };
+    cache.scans.clear();
+    cache.analyses.clear();
+  }
+  return cache.image;
+}
+
+export function computeProfiles(img, state, cache = createProfileCache()) {
+  const { stats } = imageInfo(img, cache);
+  const polarity = state.polarity === 'auto' ? cache.image.polarity : state.polarity;
   const region = state.region ?? { top: 0, bottom: img.height - 1 };
   const length = region.bottom - region.top + 1;
   const scales = defaultScales(length);
   const width = state.laneWidth ?? Math.max(3, Math.round(img.width / 30));
   const warp = makeWarp(state.warp, img.width);
   const d = state.detection ?? {};
+  const opts = {
+    sensitivity: d.sensitivity ?? 0.6,
+    minDistance: d.minDistance ?? scales.minDistance,
+    background: d.background ?? 'rollingball',
+    radius: d.radius ?? scales.radius,
+  };
+  const common = JSON.stringify([polarity, state.signal, region.top, region.bottom, width, warp ? state.warp : null]);
+  const optsKey = JSON.stringify(opts);
   const lanes = state.lanes.map((lane) => {
-    const profile = laneProfile(img, lane, { region, width, polarity, signal: state.signal, warp });
-    const a = analyseProfile(profile, {
-      sensitivity: d.sensitivity ?? 0.6,
-      minDistance: d.minDistance ?? scales.minDistance,
-      background: d.background ?? 'rollingball',
-      radius: d.radius ?? scales.radius,
-      edits: state.edits?.[lane.id],
+    const scanKey = `${lane.xTop}|${lane.xBot}|${common}`;
+    const { profile, sat } = remember(cache.scans, scanKey, () => laneScan(img, lane, { region, width, polarity, signal: state.signal, warp }));
+    const edits = state.edits?.[lane.id];
+    const a = remember(cache.analyses, `${scanKey}|${optsKey}|${JSON.stringify(edits ?? null)}`, () => {
+      const r = analyseProfile(profile, { ...opts, edits });
+      return { ...r, bands: r.bands.map((b) => ({ ...b, saturation: bandSaturation(sat, b) })) };
     });
-    const bands = a.bands.map((b) => ({ ...b, saturation: saturationOf(img, lane, b, { region, width, polarity, warp }) }));
-    return { ...lane, profile, smoothed: a.smoothed, baseline: a.baseline, bands, total: a.total };
+    return { ...lane, profile, smoothed: a.smoothed, baseline: a.baseline, bands: a.bands, total: a.total };
   });
-  const stats = imageStats(img);
   return { polarity, region, length, width, warp, lanes, stats, scales };
 }
 
@@ -136,9 +212,9 @@ export function computeProfiles(img, state) {
  * nettement plus de bandes que les autres. Rien si aucune ne se détache : un western révélé
  * en chimiluminescence, ou un gel de lysats aussi chargés que le marqueur.
  */
-export function guessLadder(img, state, lanes, laneWidth) {
+export function guessLadder(img, state, lanes, laneWidth, cache = createProfileCache()) {
   if (lanes.length < 2) return null;
-  const p = computeProfiles(img, { ...state, lanes, laneWidth, edits: {} });
+  const p = computeProfiles(img, { ...state, lanes, laneWidth, edits: {} }, cache);
   const counts = p.lanes.map((l) => l.bands.length);
   const medianOthers = (i) => {
     const o = counts.filter((_, j) => j !== i).sort((a, b) => a - b);

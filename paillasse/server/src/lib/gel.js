@@ -11,6 +11,20 @@
 import { HttpError } from './errors.js';
 
 export const PANELS = ['gel', 'profiles', 'calibration', 'standards'];
+export const gelLayout = (v) => (['row', 'grid'].includes(v) ? v : 'column');
+
+/** Largeur d'affichage de chaque panneau (% de la figure), tous à la même échelle (voir client/src/lib/gel/layout.js). */
+export function panelWidths(widths, layout = 'column') {
+  const w = widths.map((x) => Math.max(1, Number(x) || 1));
+  if (!w.length) return [];
+  let ref;
+  if (layout === 'row') ref = w.reduce((a, b) => a + b, 0);
+  else if (layout === 'grid') {
+    ref = 0;
+    for (let i = 0; i < w.length; i += 2) ref = Math.max(ref, w[i] + (w[i + 1] ?? 0));
+  } else ref = Math.max(...w);
+  return w.map((x) => Math.round((x / ref) * 1000) / 10);
+}
 const FILE_URL = /^\/api\/files\/([0-9a-f-]{36})$/;
 const UUID = /^[0-9a-f-]{36}$/;
 const str = (v, max) => String(v ?? '').slice(0, max);
@@ -70,7 +84,7 @@ export function cleanGelNode(node) {
       analysis,
       images,
       summary: gelSummary(a.summary),
-      layout: a.layout === 'row' ? 'row' : 'column',
+      layout: gelLayout(a.layout),
       width: [25, 50, 75, 100].includes(Number(a.width)) ? Number(a.width) : 100,
     },
   };

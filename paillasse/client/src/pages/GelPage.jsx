@@ -33,8 +33,12 @@ export default function GelPage() {
   const input = useRef(null);
   const saveTimer = useRef(null);
 
+  const [opening, setOpening] = useState(null);
   const open = useCallback(async (blob, filename, analysis = null, step = 'image') => {
+    setOpening(filename || 'image');
     try {
+      // Laisser le navigateur afficher « Ouverture… » avant le décodage (quelques centaines de ms sur 10 Mpx)
+      await new Promise((r) => { requestAnimationFrame(() => setTimeout(r, 0)); });
       const { image, info } = await loadGelFile(blob, filename);
       const initial = analysis
         ? { ...analysis, source: { ...analysis.source, attachmentId: null } }
@@ -43,6 +47,8 @@ export default function GelPage() {
       if (!analysis) saveDraft({ analysis: initial, blob, filename });
     } catch (err) {
       notify(err.message, 'error');
+    } finally {
+      setOpening(null);
     }
   }, [notify]);
 
@@ -125,9 +131,11 @@ export default function GelPage() {
 
       {tab === 'markers' ? <LaddersPanel ladders={ladders} /> : (
         <div className="gel-landing">
-          <button type="button" className="gel-drop" onClick={() => input.current.click()}>
+          <button type="button" className="gel-drop" onClick={() => input.current.click()} disabled={Boolean(opening)} aria-busy={Boolean(opening)}>
             <Columns4 size={34} aria-hidden="true" />
-            <strong>Déposez une image de gel, ou cliquez pour la choisir</strong>
+            {opening
+              ? <strong>Ouverture de « {opening} »…</strong>
+              : <strong>Déposez une image de gel, ou cliquez pour la choisir</strong>}
             <span className="muted">TIFF 8 ou 16 bits (recommandé), PNG, JPEG</span>
           </button>
           <input ref={input} type="file" accept=".tif,.tiff,image/*" hidden onChange={(e) => { const f = [...e.target.files]; e.target.value = ''; pick(f); }} />

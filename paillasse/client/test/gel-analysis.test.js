@@ -268,3 +268,73 @@ test('détection des pistes : pistes à une seule bande ou presque vides compris
   assert.equal(found.lanes.length, xs.length);
   found.lanes.forEach((x, i) => near(x, xs[i], 4, `piste ${i + 1}`));
 });
+
+test('bornes d’intégration réglées à la main : l’aire suit, les autres bandes non', () => {
+  const img = synthGel({ lanes: [{ x: 200, bands: [{ y: 150, amount: 60 }, { y: 300, amount: 60 }] }] });
+  const base = analyse(img, { lanes: [lane('A', 200)] });
+  const [b1, b2] = base.profiles.lanes[0].bands;
+  const narrow = { ...base.state, edits: { A: { bounds: [{ apex: b1.apex, left: b1.apex - 3, right: b1.apex + 3 }] } } };
+  const p = computeProfiles(img, narrow);
+  const [n1, n2] = p.lanes[0].bands;
+  assert.equal(n1.manual, true);
+  assert.equal(n1.left, b1.apex - 3);
+  assert.ok(n1.area < b1.area * 0.8, 'bande rétrécie : aire plus petite');
+  near(n2.area, b2.area, b2.area * 0.02, 'l’autre bande ne change pas');
+});
+
+test('mémoire des profils : mêmes résultats, et seule la piste déplacée est relue', async () => {
+  const { createProfileCache } = await import('../src/lib/gel/model.js');
+  const img = synthGel({ lanes: [80, 200, 320].map((x) => ({ x, bands: [{ y: 150, amount: 50 }, { y: 320, amount: 30 }] })) });
+  const state = { ...newAnalysis('protein'), laneWidth: 20, lanes: [80, 200, 320].map((x, i) => lane(`L${i}`, x)) };
+  const cache = createProfileCache();
+  const a = computeProfiles(img, state, cache);
+  assert.deepEqual(a.lanes.map((l) => l.bands.map((b) => b.area)), computeProfiles(img, state).lanes.map((l) => l.bands.map((b) => b.area)));
+  const scans = cache.scans.size;
+  const moved = { ...state, lanes: state.lanes.map((l, i) => (i === 1 ? { ...l, xTop: 203, xBot: 203 } : l)) };
+  computeProfiles(img, moved, cache);
+  assert.equal(cache.scans.size, scans + 1, 'une seule piste relue');
+  const tuned = { ...state, detection: { ...state.detection, sensitivity: 0.8 } };
+  computeProfiles(img, tuned, cache);
+  assert.equal(cache.scans.size, scans + 1, 'la sensibilité ne relit pas l’image');
+});
+
+test('fond rolling ball : le calcul linéaire donne la même ouverture que le calcul direct', async () => {
+  const { rollingBall, slidingExtreme } = await import('../src/lib/gel/profile.js');
+  const p = Float32Array.from({ length: 400 }, (_, i) => 100 + 40 * Math.sin(i / 17) + (i % 37 === 0 ? 80 : 0) + ((i * 7919) % 13));
+  const r = 15;
+  const ero = p.map((_, i) => Math.min(...p.slice(Math.max(0, i - r), i + r + 1)));
+  const dil = ero.map((_, i) => Math.max(...ero.slice(Math.max(0, i - r), i + r + 1)));
+  assert.deepEqual(Array.from(slidingExtreme(p, r, false)), Array.from(ero), 'minimum glissant exact');
+  assert.deepEqual(Array.from(slidingExtreme(ero, r, true)), Array.from(dil), 'maximum glissant exact');
+  const got = rollingBall(p, r);
+  // rollingBall lisse ensuite l'ouverture et la borne par le profil : on compare avant lissage via un profil plat
+  const flat = rollingBall(new Float32Array(400).fill(5), r);
+  assert.ok(flat.every((v) => Math.abs(v - 5) < 1e-4));
+  for (let i = r; i < 400 - r; i += 1) assert.ok(got[i] <= p[i] + 1e-4, 'le fond ne dépasse jamais le profil');
+  const mean = (a) => a.reduce((t, v) => t + v, 0) / a.length;
+  near(mean(got), mean(dil.map((v, i) => Math.min(v, p[i]))), 3, 'ouverture morphologique');
+});
+
+test('courbes normalisées : maximum 1 ou aire totale 100', async () => {
+  const { traceOf, panelWidths } = await import('../src/lib/gel/figure.js');
+  const img = synthGel({ lanes: [{ x: 200, bands: [{ y: 150, amount: 60 }, { y: 300, amount: 20 }] }] });
+  const l = analyse(img, { lanes: [lane('A', 200)] }).profiles.lanes[0];
+  near(traceOf(l, { normalize: 'max' }).max, 1, 1e-6, 'maximum');
+  near(traceOf(l, { normalize: 'area' }).v.reduce((t, v) => t + v, 0), 100, 1e-3, 'aire');
+  assert.deepEqual(panelWidths([1000, 500], 'row'), [66.7, 33.3]);
+  assert.deepEqual(panelWidths([1000, 500]), [100, 50]);
+});
+
+test('analyse enregistrée par une version précédente : nouveaux réglages par défaut, anciens gardés', async () => {
+  const { normalizeAnalysis } = await import('../src/lib/gel/model.js');
+  const old = { ...newAnalysis('dna'), figure: { panels: { gel: true, profiles: false, table: true }, gel: { overlay: 'lines' }, layout: 'row', width: 75 } };
+  delete old.bandNames;
+  const s = normalizeAnalysis(old);
+  assert.equal(s.figure.gel.overlay, 'lines');
+  assert.equal(s.figure.layout, 'row');
+  assert.equal(s.figure.panels.profiles, false);
+  assert.equal(s.figure.style.fontSize, 14);
+  assert.equal(s.figure.gel.labelAngle, 'auto');
+  assert.deepEqual(s.figure.order, ['gel', 'profiles', 'calibration', 'standards']);
+  assert.deepEqual(s.bandNames, []);
+});

@@ -11,35 +11,33 @@ const COMPRESSION = { 1: 'aucune', 5: 'LZW', 7: 'JPEG', 8: 'Deflate', 32773: 'Pa
 
 export class TiffError extends Error {}
 
+const LITTLE_ENDIAN_HOST = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
+/**
+ * LZW (TIFF). Le dictionnaire ne stocke pas les chaînes : chaque code renvoie à l'endroit de la
+ * sortie où sa chaîne a déjà été écrite (position, longueur), recopiée d'un bloc.
+ */
 function lzwDecode(input, expected) {
   const out = new Uint8Array(expected);
-  const prefix = new Int32Array(4096);
-  const suffix = new Uint8Array(4096);
-  const first = new Uint8Array(4096);
-  const length = new Uint16Array(4096);
-  for (let i = 0; i < 256; i += 1) {
-    prefix[i] = -1;
-    suffix[i] = i;
-    first[i] = i;
-    length[i] = 1;
-  }
+  const n = out.length;
+  const offset = new Int32Array(4096);
+  const length = new Int32Array(4096);
   let codeLen = 9;
   let next = 258;
   let old = -1;
+  let oldPos = 0;
+  let oldLen = 0;
   let op = 0;
   let ip = 0;
   let buf = 0;
   let bits = 0;
-  const write = (code) => {
-    const len = length[code];
-    let c = code;
-    for (let k = len - 1; k >= 0; k -= 1) {
-      if (op + k < out.length) out[op + k] = suffix[c];
-      c = prefix[c];
-    }
+  const copy = (src, len) => {
+    const m = Math.min(len, n - op);
+    if (m > 16) out.copyWithin(op, src, src + m);
+    else for (let k = 0; k < m; k += 1) out[op + k] = out[src + k];
     op += len;
   };
-  while (op < out.length) {
+  while (op < n) {
     while (bits < codeLen) {
       if (ip >= input.length) return out;
       buf = ((buf << 8) | input[ip++]) >>> 0;
@@ -54,22 +52,35 @@ function lzwDecode(input, expected) {
       old = -1;
       continue;
     }
-    if (old === -1) {
-      if (code > 255) break;
-      write(code);
-      old = code;
-      continue;
+    const start = op;
+    let len;
+    if (code < 256) {
+      out[op] = code;
+      op += 1;
+      len = 1;
+    } else if (old === -1) {
+      break; // après une remise à zéro, le premier code est un octet
+    } else if (code < next) {
+      len = length[code];
+      copy(offset[code], len);
+    } else if (code === next) {
+      // Cas « KwKwK » : la chaîne précédente suivie de son premier octet
+      len = oldLen + 1;
+      copy(oldPos, oldLen);
+      if (op < n) out[op] = out[oldPos];
+      op += 1;
+    } else {
+      break; // flux corrompu
     }
-    if (code > next) break; // flux corrompu
-    if (next < 4096) {
-      prefix[next] = old;
-      first[next] = first[old];
-      length[next] = length[old] + 1;
-      suffix[next] = code < next ? first[code] : first[old];
+    // Nouvelle entrée : chaîne précédente + premier octet de celle-ci, déjà contiguës dans la sortie
+    if (old !== -1 && next < 4096) {
+      offset[next] = oldPos;
+      length[next] = oldLen + 1;
       next += 1;
     }
-    write(code);
     old = code;
+    oldPos = start;
+    oldLen = len;
     // Changement anticipé : la largeur augmente dès que le prochain code atteint 2^n − 1
     if (next >= (1 << codeLen) - 1 && codeLen < 12) codeLen += 1;
   }
@@ -168,12 +179,13 @@ export async function decodeTiff(input) {
   const across = Math.ceil(width / chunkW);
   const palette = photometric === 3 ? tags.get(320) : null;
 
-  const sample = (arr, off) => {
-    if (bits === 8) return sampleFormat === 2 ? (arr[off] << 24) >> 24 : arr[off];
-    const v = new DataView(arr.buffer, arr.byteOffset + off, bps);
-    if (bits === 16) return sampleFormat === 2 ? v.getInt16(0, le) : v.getUint16(0, le);
-    if (sampleFormat === 3) return v.getFloat32(0, le);
-    return sampleFormat === 2 ? v.getInt32(0, le) : v.getUint32(0, le);
+  // Lecture d'une valeur : une seule vue par bloc (en créer une par pixel coûtait une seconde sur 8 Mpx)
+  const reader = (arr) => {
+    const v = new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
+    if (bits === 8) return sampleFormat === 2 ? (off) => v.getInt8(off) : (off) => arr[off];
+    if (bits === 16) return sampleFormat === 2 ? (off) => v.getInt16(off, le) : (off) => v.getUint16(off, le);
+    if (sampleFormat === 3) return (off) => v.getFloat32(off, le);
+    return sampleFormat === 2 ? (off) => v.getInt32(off, le) : (off) => v.getUint32(off, le);
   };
 
   const data = new Float32Array(width * height);
@@ -205,6 +217,19 @@ export async function decodeTiff(input) {
       }
     }
 
+    // Cas courant (gris 8 ou 16 bits non signés, même boutisme que la machine) : copie ligne par ligne
+    if (!palette && spp === 1 && sampleFormat !== 2 && sampleFormat !== 3
+      && (bits === 8 || (bits === 16 && le === LITTLE_ENDIAN_HOST && chunk.byteOffset % 2 === 0))) {
+      const arr = bits === 8 ? chunk : new Uint16Array(chunk.buffer, chunk.byteOffset, chunk.byteLength >> 1);
+      const cols = Math.min(chunkW, width - cx);
+      for (let r = 0; r < rows && cy + r < height; r += 1) {
+        const from = r * chunkW;
+        if (from + cols > arr.length) break;
+        data.set(arr.subarray(from, from + cols), (cy + r) * width + cx);
+      }
+      continue;
+    }
+    const sample = reader(chunk);
     for (let r = 0; r < rows; r += 1) {
       const y = cy + r;
       if (y >= height) break;
@@ -215,13 +240,13 @@ export async function decodeTiff(input) {
         if (off + pixelBytes > chunk.length) break;
         let value;
         if (palette) {
-          const idx = sample(chunk, off);
+          const idx = sample(off);
           const n = palette.length / 3;
           value = (0.299 * palette[idx] + 0.587 * palette[n + idx] + 0.114 * palette[2 * n + idx]) / 257;
         } else if (spp >= 3 && photometric === 2) {
-          value = 0.299 * sample(chunk, off) + 0.587 * sample(chunk, off + bps) + 0.114 * sample(chunk, off + 2 * bps);
+          value = 0.299 * sample(off) + 0.587 * sample(off + bps) + 0.114 * sample(off + 2 * bps);
         } else {
-          value = sample(chunk, off);
+          value = sample(off);
         }
         data[y * width + x] = value;
       }

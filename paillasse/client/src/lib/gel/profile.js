@@ -4,7 +4,7 @@
 // contraste et luminosité n'ont aucun effet sur les aires. Positions le long d'une piste :
 // indice dans la zone de migration (0 = haut de la zone), en coordonnées corrigées de la courbure.
 
-import { sampleAt, signalFn } from './raster.js';
+
 
 /** Abscisse d'une piste (éventuellement inclinée) à la ligne y. */
 export function laneX(lane, y, region) {
@@ -88,29 +88,69 @@ export function unwarp(warp, x, rawY, height) {
 // --- Profil d'une piste --------------------------------------------------------------------------
 
 /**
- * Profil de migration : moyenne du signal sur la largeur de la piste, ligne par ligne.
- * Renvoie { profile, rows } (rows[i] = ligne de l'image lue pour la position i, pour le tracé).
+ * Lecture d'une piste, ligne par ligne, en une passe :
+ *   profile[i] = moyenne du signal sur la largeur de la piste (interpolation bilinéaire) ;
+ *   sat[i]     = part des pixels écrêtés sur cette ligne (saturés au noir pour des bandes
+ *                sombres, au blanc pour des bandes claires).
+ * C'est la seule étape qui lit l'image : le reste de l'analyse travaille sur ces deux tableaux.
  */
-export function laneProfile(img, lane, { region, width, polarity, signal = 'linear', warp = null }) {
-  const sig = signalFn(img, polarity, signal);
+export function laneScan(img, lane, { region, width, polarity, signal = 'linear', warp = null }) {
+  const { data, width: W, height: H } = img;
+  const max = img.maxValue || 1;
+  const dark = polarity === 'dark';
+  const od = dark && signal === 'od';
+  const limit = dark ? max * 0.002 : max * 0.998;
   const n = region.bottom - region.top + 1;
   const profile = new Float32Array(n);
+  const sat = new Float32Array(n);
   const hw = Math.max(0, (width - 1) / 2);
+  const steps = Math.floor(2 * hw + 1e-9) + 1;
   for (let i = 0; i < n; i += 1) {
     const y = region.top + i;
     const x = laneX(lane, y, region);
     const ry = warp ? warp(x, y) : y;
+    if (ry < 0 || ry > H - 1) continue;
+    const y0 = Math.floor(ry);
+    const fy = ry - y0;
+    const r0 = y0 * W;
+    const r1 = (y0 < H - 1 ? y0 + 1 : y0) * W;
     let s = 0;
     let c = 0;
-    for (let dx = -hw; dx <= hw + 1e-9; dx += 1) {
-      const px = x + dx;
-      if (px < 0 || px > img.width - 1 || ry < 0 || ry > img.height - 1) continue;
-      s += sig(sampleAt(img, px, ry));
+    for (let k = 0; k < steps; k += 1) {
+      const px = x - hw + k;
+      if (px < 0 || px > W - 1) continue;
+      const xa = Math.floor(px);
+      const xb = xa < W - 1 ? xa + 1 : xa;
+      const fx = px - xa;
+      const top = data[r0 + xa] + (data[r0 + xb] - data[r0 + xa]) * fx;
+      const v = top + (data[r1 + xa] + (data[r1 + xb] - data[r1 + xa]) * fx - top) * fy;
+      s += od ? Math.log10(max / Math.max(v, max * 1e-4)) : dark ? max - v : v;
       c += 1;
     }
     profile[i] = c ? s / c : 0;
+    const row = Math.round(ry) * W;
+    let hit = 0;
+    let cnt = 0;
+    for (let px = Math.max(0, Math.round(x - hw)); px <= Math.min(W - 1, Math.round(x + hw)); px += 1) {
+      const v = data[row + px];
+      cnt += 1;
+      if (dark ? v <= limit : v >= limit) hit += 1;
+    }
+    sat[i] = cnt ? hit / cnt : 0;
   }
-  return profile;
+  return { profile, sat };
+}
+
+/** Profil de migration seul (voir laneScan). */
+export function laneProfile(img, lane, opts) {
+  return laneScan(img, lane, opts).profile;
+}
+
+/** Part des pixels saturés d'une bande, d'après la lecture de sa piste. Au-delà de 1 %, l'aire est sous-estimée. */
+export function bandSaturation(sat, band) {
+  let t = 0;
+  for (let i = band.left; i <= band.right; i += 1) t += sat[i] ?? 0;
+  return t / Math.max(1, band.right - band.left + 1);
 }
 
 /** Lissage triangulaire (conserve l'aire). */
@@ -141,22 +181,33 @@ export function defaultScales(length) {
 
 // --- Fond ---------------------------------------------------------------------------------------
 
+/** Minimum (ou maximum) glissant sur [i − r, i + r], en temps linéaire (file monotone). */
+export function slidingExtreme(p, r, isMax) {
+  const n = p.length;
+  const out = new Float32Array(n);
+  const q = new Int32Array(n);
+  let head = 0;
+  let tail = 0;
+  const better = isMax ? (a, b) => a >= b : (a, b) => a <= b;
+  let next = 0;
+  for (let i = 0; i < n; i += 1) {
+    const hi = Math.min(n - 1, i + r);
+    for (; next <= hi; next += 1) {
+      while (tail > head && better(p[next], p[q[tail - 1]])) tail -= 1;
+      q[tail++] = next;
+    }
+    while (q[head] < i - r) head += 1;
+    out[i] = p[q[head]];
+  }
+  return out;
+}
+
 /** « Rolling ball » : ouverture morphologique (minimum puis maximum glissants), puis léger lissage. */
 export function rollingBall(p, radius) {
   const n = p.length;
   const r = Math.max(1, Math.round(radius));
-  const ero = new Float32Array(n);
-  for (let i = 0; i < n; i += 1) {
-    let m = Infinity;
-    for (let j = Math.max(0, i - r); j <= Math.min(n - 1, i + r); j += 1) if (p[j] < m) m = p[j];
-    ero[i] = m;
-  }
-  const dil = new Float32Array(n);
-  for (let i = 0; i < n; i += 1) {
-    let m = -Infinity;
-    for (let j = Math.max(0, i - r); j <= Math.min(n - 1, i + r); j += 1) if (ero[j] > m) m = ero[j];
-    dil[i] = m;
-  }
+  const ero = slidingExtreme(p, r, false);
+  const dil = slidingExtreme(ero, r, true);
   const s = smooth(dil, Math.max(3, Math.round(r / 2)));
   for (let i = 0; i < n; i += 1) s[i] = Math.min(s[i], p[i]);
   return s;
@@ -269,7 +320,7 @@ export function bandArea(p, base, band) {
 
 /**
  * Analyse complète d'un profil : bandes détectées, corrections manuelles, fond, aires.
- * edits = { added: [positions], removed: [positions] }.
+ * edits = { added: [positions], removed: [positions], bounds: [{ apex, left, right }] }.
  */
 export function analyseProfile(p, { sensitivity = 0.6, minDistance, smoothing, background = 'rollingball', radius, edits } = {}) {
   const n = p.length;
@@ -290,7 +341,18 @@ export function analyseProfile(p, { sensitivity = 0.6, minDistance, smoothing, b
     const apex = localApex(s, a, tol);
     if (apex >= 0 && apex < n && apexes.every((x) => Math.abs(x - apex) > 1)) apexes.push(apex);
   }
-  const bands = bandBounds(s, apexes);
+  // Bornes d'intégration réglées à la main (edits.bounds), retrouvées par le sommet de la bande
+  const fixed = edits?.bounds ?? [];
+  const bands = bandBounds(s, apexes).map((b) => {
+    const e = fixed.find((x) => Math.abs(x.apex - b.apex) <= tol);
+    if (!e) return b;
+    return {
+      ...b,
+      left: Math.max(0, Math.min(b.apex - 1, Math.round(e.left))),
+      right: Math.min(n - 1, Math.max(b.apex + 1, Math.round(e.right))),
+      manual: true,
+    };
+  });
   let base;
   if (background === 'valley') base = valleyBaseline(s, bands);
   else if (background === 'min') base = flatBaseline(s);
@@ -306,8 +368,8 @@ export function analyseProfile(p, { sensitivity = 0.6, minDistance, smoothing, b
 }
 
 /**
- * Part de pixels saturés dans le rectangle d'une bande (écrêtés au noir pour des bandes sombres,
- * au blanc pour des bandes claires). Au-delà de 1 %, la bande est sous-estimée.
+ * Part de pixels saturés dans le rectangle d'une bande, lue directement dans l'image
+ * (l'analyse utilise bandSaturation, calculée pendant la lecture de la piste).
  */
 export function saturationOf(img, lane, band, { region, width, polarity, warp }) {
   const limit = polarity === 'dark' ? img.maxValue * 0.002 : img.maxValue * 0.998;

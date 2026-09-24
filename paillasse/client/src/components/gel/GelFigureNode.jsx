@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Node, NodeViewWrapper, ReactNodeViewRenderer, mergeAttributes } from '@tiptap/react';
 import { Columns4, FileImage, Pencil, RotateCcw } from 'lucide-react';
 import { setResume } from '../../lib/gel/draft.js';
+import { panelWidths } from '../../lib/gel/layout.js';
 
 const parseJson = (value, fallback) => {
   try {
@@ -30,10 +31,11 @@ function GelFigureView({ node, editor, updateAttributes }) {
   const notes = s.notes ?? [];
   const sourceId = analysis?.source?.attachmentId;
   const canEdit = editable && typeof editor.storage.gelFigure?.edit === 'function';
+  const widths = panelWidths((images ?? []).map((i) => i.width), layout);
 
   return (
     <NodeViewWrapper className="gelfig-node" data-drag-handle onDoubleClick={canEdit ? () => editor.storage.gelFigure.edit(node.attrs, updateAttributes) : undefined}>
-      <figure contentEditable={false} className={`gelfig-card gelfig-${layout === 'row' ? 'row' : 'column'}`} style={{ width: `${width ?? 100}%` }}>
+      <figure contentEditable={false} className={`gelfig-card gelfig-${['row', 'grid'].includes(layout) ? layout : 'column'}`} style={{ width: `${width ?? 100}%` }}>
         <figcaption>
           <Columns4 size={17} aria-hidden="true" />
           <span className="gelfig-title"><strong>{s.title ?? 'Figure de gel'}</strong>{s.mode && <span className="muted"> — {s.mode}</span>}</span>
@@ -61,7 +63,7 @@ function GelFigureView({ node, editor, updateAttributes }) {
         </figcaption>
         {s.lanes?.length > 0 && <p className="gelfig-lanes">Pistes : {s.lanes.join(', ')}</p>}
         <div className="gelfig-panels">
-          {(images ?? []).map((img) => <img key={img.src} src={img.src} alt={img.alt} width={img.width} height={img.height} loading="lazy" />)}
+          {(images ?? []).map((img, i) => <img key={img.src} src={img.src} alt={img.alt} width={img.width} height={img.height} style={{ width: `${widths[i]}%` }} loading="lazy" />)}
         </div>
         {s.table && (
           <div className="calc-table-wrap">

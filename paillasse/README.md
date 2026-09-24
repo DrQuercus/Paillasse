@@ -69,7 +69,9 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   corrige, on les archive. Corriger une masse molaire ne change pas les calculs déjà enregistrés.
 - **Analyse de gels** (menu « Gels », reprise et refonte de SDS-PAGE Analyzer) en trois modes :
   **protéines** (SDS-PAGE : Coomassie, argent, stain-free), **western blot** (chimiluminescence, fluorescence)
-  et **ADN / ARN** (agarose : BET, SYBR, GelRed). Un atelier guidé en cinq étapes :
+  et **ADN / ARN** (agarose : BET, SYBR, GelRed). Deux présentations, au choix dans l'en-tête de l'atelier :
+  **Rapide** (tous les réglages sur un écran, pistes détectées et dernier marqueur appliqué dès l'ouverture,
+  comme dans l'analyseur d'origine) et **Pas à pas**, guidé en cinq étapes :
   1. *Image* : TIFF 8 ou 16 bits (LZW, Deflate, PackBits, tuiles, flottants), PNG ou JPEG ; quarts de tour,
      miroirs, redressement fin, rognage ; contraste, gamma et palette qui ne touchent jamais aux mesures ;
      bandes sombres ou claires détectées seules ; densité optique pour un Coomassie en transmission.
@@ -86,11 +88,19 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
      rapport molaire des bandes d'une piste ; bandes saturées signalées ; tailles attendues calculées depuis
      le registre (masse de la protéine d'un CDS, fragments d'une PCR ou d'une digestion) et comparées aux
      bandes observées.
-  5. *Figure* : le configurateur de l'encart. Gel sans pistes, avec lignes ou cadres, noms des pistes,
-     échelle de tailles, tailles des bandes, tailles attendues, flèches annotées, recadrage sur les pistes ;
-     profils de migration sur fond blanc (axe en tailles), tableau, courbe d'étalonnage, gamme étalon ;
-     disposition en colonne ou côte à côte, largeur dans la page. Téléchargement en PNG, SVG et CSV.
-  Annuler / rétablir (Ctrl+Z / Ctrl+Y) à chaque étape ; l'analyse en cours sur la page Gels est gardée dans le
+  5. *Figure* : le configurateur de l'encart. Panneaux (gel, profils, étalonnage, gamme) dans l'ordre voulu,
+     en colonne, côte à côte ou en grille, tous à la même échelle ; préréglages Cahier, Article, Diaporama,
+     Noir et blanc ; police, taille du texte, épaisseur des courbes, couleurs ou niveaux de gris, lettres
+     A, B, C. Gel : taille, sans pistes / lignes / cadres, noms des pistes au-dessus ou au-dessous (droits,
+     à 45° ou verticaux), échelle à gauche ou à droite, tailles ou noms des bandes, tailles attendues,
+     flèches annotées, cadre. Profils : superposés ou empilés, normalisés (maximum ou aire totale), axe en
+     tailles ou en migration, légende dedans, à droite ou au-dessus, largeur et hauteur, aires, quadrillage.
+     Téléchargement en PNG, SVG et CSV.
+  À droite de l'atelier, un **panneau d'analyse** redimensionnable : profil de la piste active (courbe lissée
+  ou brute, avec ou sans fond, % de chaque bande, bornes d'intégration à régler à la souris), comparaison
+  de pistes superposées ou empilées et normalisées, courbe d'étalonnage avec l'écart de chaque marqueur,
+  tableau de toutes les bandes. Zoom à la molette, réticule synchronisé avec le gel, export PNG du graphique.
+  Annuler / rétablir (Ctrl+Z / Ctrl+Y) partout ; l'analyse en cours sur la page Gels est gardée dans le
   navigateur et se reprend après un rechargement.
 - **Figure de gel dans une entrée** : bouton « Figure de gel » de la barre d'outils, « Analyser le gel » sur une
   image déjà jointe, ou « Insérer dans une entrée » depuis la page Gels. L'image d'origine est jointe telle
@@ -215,6 +225,11 @@ tailles après correction de courbure, pistes presque vides), et sur 12 TIFF de 
 Pillow (`client/test/make-tiff-fixtures.py` : 8, 16 et 32 bits, LZW, Deflate, PackBits, tuiles, prédicteur,
 palette, MinIsWhite, RGB).
 
+Temps de calcul (image d'imageur de 7,7 Mpx, 16 bits) : chaque piste n'est relue dans l'image que si elle
+bouge, les réglages de détection ne relisent rien ; le redressement se prévisualise instantanément et se
+calcule au relâchement du curseur ; le décodage TIFF et l'affichage travaillent par blocs. Une image de
+cette taille s'ouvre en moins d'une seconde et les curseurs réagissent sans délai.
+
 Les mesures se font toujours sur les intensités brutes de l'image préparée (orientée, redressée, rognée) :
 contraste, gamma, palette et inversion ne servent qu'à l'affichage et à la figure. Le serveur ne refait pas
 l'analyse : il vérifie que les images de l'encart sont des pièces jointes de l'entrée et affiche le tableau
@@ -279,7 +294,7 @@ client/
   src/components/calc/         formulaires, encart dans l'éditeur (LabCalcNode), produits
   src/pages/CalcPage.jsx       page Calculs
   src/lib/gel/                 analyse de gel : TIFF, image, profils, étalonnage, quantification, figure (testés)
-  src/components/gel/          atelier en cinq étapes (GelWorkbench), encart dans l'éditeur (GelFigureNode)
+  src/components/gel/          atelier (GelWorkbench : pas à pas ou rapide), panneau d'analyse, encart (GelFigureNode)
   src/pages/GelPage.jsx        page Gels (analyse libre, marqueurs)
 deploy/                        service systemd, sauvegarde et son timer
 ```

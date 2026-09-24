@@ -1,20 +1,22 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Check as CheckIcon, ChevronRight, Redo2, Undo2, X } from 'lucide-react';
 import { useApp } from '../../context.js';
-import { detectPolarity, prepareImage } from '../../lib/gel/raster.js';
-import { MODES, computeProfiles, computeResults, newId, shiftGeometry, switchMode } from '../../lib/gel/model.js';
+import { prepareImage } from '../../lib/gel/raster.js';
+import { MODES, computeProfiles, computeResults, createProfileCache, imageInfo, newId, normalizeAnalysis, shiftGeometry, suggestCalibration, switchMode } from '../../lib/gel/model.js';
 import { formatSize } from '../../lib/gel/calibration.js';
 import { renderToCanvas, signalRange } from '../../lib/gel/render.js';
 import Modal from '../Modal.jsx';
 import { Segmented } from './controls.jsx';
 import GelCanvas from './GelCanvas.jsx';
-import LaneDetails from './LaneDetails.jsx';
+import AnalysisPanel from './AnalysisPanel.jsx';
+import QuickPanel from './QuickPanel.jsx';
 import LaddersPanel from './LaddersPanel.jsx';
-import { StepImage, StepLanes } from './StepsPrepare.jsx';
+import { StepImage, StepLanes, detectLanesInto } from './StepsPrepare.jsx';
 import { StepBands, StepSizes } from './StepsMeasure.jsx';
 import { FigurePreview, StepFigure } from './StepFigure.jsx';
 import useHistory from './useHistory.js';
-import useLadders from './useLadders.js';
+import useLadders, { ladderSnapshot } from './useLadders.js';
+import { lastLadder, lastView, rememberView } from '../../lib/gel/draft.js';
 
 const STEPS = [
   ['image', 'Image', StepImage],
@@ -39,10 +41,17 @@ const TOOL_HINTS = {
  */
 export default function GelWorkbench({ source, initial, initialStep, submitLabel = 'Insérer dans l’entrée', onSubmit, onClose, onChange }) {
   const { notify } = useApp();
-  const { state, update, commit, undo, redo, canUndo, canRedo } = useHistory(initial);
+  const [start] = useState(() => normalizeAnalysis(initial));
+  const { state, update, commit, undo, redo, canUndo, canRedo } = useHistory(start);
   const [step, setStep] = useState(initialStep ?? 'image');
+  // Présentation : pas à pas (guidé) ou rapide (tout sur un écran) ; une figure rouverte l'est en pas à pas
+  const [view, setViewState] = useState(() => (initialStep === 'figure' ? 'steps' : lastView()));
+  const setView = (v) => { setViewState(v); rememberView(v); };
+  const [detailsW, setDetailsW] = useState(() => {
+    try { return Number(localStorage.getItem('paillasse.gel.panel')) || 440; } catch { return 440; }
+  });
   const [tool, setToolState] = useState('select');
-  const [activeLaneId, setActiveLaneId] = useState(() => initial.lanes.find((l) => l.role !== 'ladder')?.id ?? initial.lanes[0]?.id ?? null);
+  const [activeLaneId, setActiveLaneId] = useState(() => start.lanes.find((l) => l.role !== 'ladder')?.id ?? start.lanes[0]?.id ?? null);
   const [hoverPos, setHoverPos] = useState(null);
   const [activeWarpId, setActiveWarpId] = useState(null);
   const [calibSize, setCalibSize] = useState(null);
@@ -55,20 +64,61 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
   const { rotate90, flipH, flipV, angle, crop } = state.prep;
   const uncropped = useMemo(() => prepareImage(source.image, { rotate90, flipH, flipV, angle }), [source.image, rotate90, flipH, flipV, angle]);
   const img = useMemo(() => (crop ? prepareImage(uncropped, { crop }) : uncropped), [uncropped, crop]);
-  const detectedPolarity = useMemo(() => detectPolarity(img), [img]);
+  // Mémoire des lectures de pistes : déplacer une piste ne relit qu'elle, régler la détection ne relit rien
+  const cache = useRef(null);
+  if (!cache.current) cache.current = createProfileCache();
+  const detectedPolarity = useMemo(() => imageInfo(img, cache.current).polarity, [img]);
   const polarity = state.polarity === 'auto' ? detectedPolarity : state.polarity;
 
   // Calculs sur l'état différé : l'interface reste fluide pendant qu'on glisse une piste
   const d = useDeferredValue(state);
-  const profiles = useMemo(() => computeProfiles(img, d), [img, d.polarity, d.signal, d.region, d.laneWidth, d.lanes, d.warp, d.detection, d.edits]); // eslint-disable-line react-hooks/exhaustive-deps
+  const profiles = useMemo(() => computeProfiles(img, d, cache.current), [img, d.polarity, d.signal, d.region, d.laneWidth, d.lanes, d.warp, d.detection, d.edits]); // eslint-disable-line react-hooks/exhaustive-deps
   const results = useMemo(() => computeResults(profiles, d, source.info), [profiles, d.calibration, d.quant, d.expected, d.mode, d.bandNames]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rendu de l'image (mis en cache : ne dépend que de l'image et des réglages d'affichage)
+  // Redressement : aperçu immédiat (l'image affichée tourne), calcul réel quand on lâche le curseur
+  const [anglePreview, setAnglePreview] = useState(null);
+  const angleTimer = useRef(null);
+  const commitAngle = useCallback((angle) => {
+    clearTimeout(angleTimer.current);
+    setAnglePreview(null);
+    update((s) => (s.prep.angle === angle ? s : { ...s, prep: { ...s.prep, angle } }), { key: 'angle' });
+  }, [update]);
+  const previewAngle = useCallback((angle) => {
+    setAnglePreview(angle);
+    clearTimeout(angleTimer.current);
+    angleTimer.current = setTimeout(() => commitAngle(angle), 450);
+  }, [commitAngle]);
+  useEffect(() => () => clearTimeout(angleTimer.current), []);
+  // Action qui a besoin de l'image redressée (détection des pistes) : attend le calcul en cours
+  const ctxRef = useRef(null);
+  const afterImage = useRef(null);
+  useEffect(() => {
+    const fn = afterImage.current;
+    afterImage.current = null;
+    fn?.(ctxRef.current);
+  }, [img]);
+  const settle = (fn) => {
+    if (anglePreview === null || anglePreview === (state.prep.angle ?? 0)) {
+      if (anglePreview !== null) { clearTimeout(angleTimer.current); setAnglePreview(null); }
+      fn(ctxRef.current);
+      return;
+    }
+    afterImage.current = fn;
+    commitAngle(anglePreview);
+  };
+  const goStep = (key) => {
+    if (anglePreview !== null) commitAngle(anglePreview);
+    setStep(key);
+    setTool('select');
+  };
+
+  // Rendu de l'image (mis en cache : ne dépend que de l'image et des réglages d'affichage, différés)
   const viewImg = tool === 'crop' ? uncropped : img;
+  const display = useDeferredValue(state.display);
   const range = useMemo(() => signalRange(viewImg, polarity), [viewImg, polarity]);
   const base = useMemo(
-    () => renderToCanvas(viewImg, { polarity, display: state.display, darkBands: polarity === 'dark', colormap: state.display.colormap, range }),
-    [viewImg, polarity, state.display, range],
+    () => renderToCanvas(viewImg, { polarity, display, darkBands: polarity === 'dark', colormap: display.colormap, range }),
+    [viewImg, polarity, display, range],
   );
 
   useEffect(() => { onChange?.(state); }, [state, onChange]);
@@ -156,7 +206,7 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
   const submit = async () => {
     setBusy(true);
     try {
-      const fresh = computeProfiles(img, state);
+      const fresh = computeProfiles(img, state, cache.current);
       await onSubmit({ state, img, profiles: fresh, results: computeResults(fresh, state, source.info) });
     } catch (err) {
       notify(err.message, 'error');
@@ -175,11 +225,54 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
   const stepIndex = STEPS.findIndex(([k]) => k === step);
   const StepPanel = STEPS[stepIndex][2];
   const ctx = {
-    state, update, commit, profiles, results, info: source.info, img, uncropped, detectedPolarity, tool, setTool,
+    state, update, commit, profiles, results, info: source.info, img, uncropped, detectedPolarity, tool, setTool, cache: cache.current,
+    angle: anglePreview ?? state.prep.angle ?? 0, previewAngle, commitAngle, settle,
     activeLaneId, setActiveLaneId, activeWarpId, setActiveWarpId, calibSize, setCalibSize, ladders, notify,
     openLadders: () => setLaddersOpen(true),
   };
-  const showDetails = step !== 'image' && step !== 'figure';
+  ctxRef.current = ctx;
+  const quick = view === 'quick';
+  const showDetails = quick || (step !== 'image' && step !== 'figure');
+
+  // Analyse rapide : pistes détectées et dernier marqueur appliqué d'office (une fois par image)
+  const auto = useRef({ lanes: false, ladder: false });
+  useEffect(() => { auto.current.ladder = false; }, [state.mode]);
+  useEffect(() => {
+    if (!quick || state.lanes.length || auto.current.lanes) return;
+    auto.current.lanes = true;
+    detectLanesInto(ctx);
+  }, [quick, state.lanes.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!quick || auto.current.ladder || state.calibration.ladder || !ladders) return;
+    const lane = results.ladderLane;
+    if (!lane || lane.id !== state.calibration.laneId || !lane.bands.length) return;
+    auto.current.ladder = true;
+    const kind = MODES[state.mode].ladderKind;
+    const found = ladders.find((l) => l.id === lastLadder(kind) && l.kind === kind && !l.archived);
+    if (!found) return;
+    const snap = ladderSnapshot(found);
+    update((s) => ({ ...s, calibration: { ...s.calibration, ladder: snap, points: suggestCalibration(results, snap) } }));
+    notify(`Marqueur « ${found.name} » appliqué (le dernier utilisé) : changez-le si besoin.`, 'success');
+  }, [quick, results, ladders, state.calibration.ladder, state.calibration.laneId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Panneau d'analyse redimensionnable (poignée sur son bord gauche)
+  const body = useRef(null);
+  const onResizeStart = (e) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      const r = body.current.getBoundingClientRect();
+      setDetailsW(Math.round(Math.max(320, Math.min(r.width - 330 - 280, r.right - ev.clientX))));
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      setDetailsW((w) => { try { localStorage.setItem('paillasse.gel.panel', String(w)); } catch { /* sans stockage */ } return w; });
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
 
   return (
     <div className="gel-wb" role="dialog" aria-modal="true" aria-label="Analyse de gel">
@@ -187,17 +280,20 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
         <button type="button" className="btn btn-ghost" onClick={onClose}><X size={16} /> Fermer</button>
         <input className="gel-title" value={state.name} onChange={(e) => update((s) => ({ ...s, name: e.target.value }), { key: 'name' })} placeholder="Titre de la figure" aria-label="Titre de la figure" />
         <Segmented label="Type de gel" value={state.mode} onChange={(mode) => update((s) => switchMode(s, mode))} options={Object.entries(MODES).map(([k, m]) => [k, m.label])} />
+        <Segmented label="Présentation" value={view} onChange={(v) => { setView(v); goStep(step); }} options={[['steps', 'Pas à pas'], ['quick', 'Rapide']]} />
         <div className="gel-wb-actions">
           <button type="button" className="icon-btn" onClick={undo} disabled={!canUndo} title="Annuler (Ctrl+Z)" aria-label="Annuler"><Undo2 size={17} /></button>
           <button type="button" className="icon-btn" onClick={redo} disabled={!canRedo} title="Rétablir (Ctrl+Maj+Z)" aria-label="Rétablir"><Redo2 size={17} /></button>
           <button type="button" className="btn btn-primary" onClick={submit} disabled={busy || !state.lanes.length}>{busy ? 'Enregistrement…' : submitLabel}</button>
         </div>
       </header>
-      <div className={`gel-wb-body${showDetails ? '' : ' no-details'}`}>
+      <div ref={body} className={`gel-wb-body${showDetails ? '' : ' no-details'}`} style={{ '--gel-details-w': `${detailsW}px` }}>
         <aside className="gel-wb-side">
+          {quick ? <QuickPanel ctx={ctx} onFigure={() => { setView('steps'); goStep('figure'); }} /> : (
+          <>
           <nav className="gel-steps" aria-label="Étapes">
             {STEPS.map(([key, label], i) => (
-              <button key={key} type="button" className={`gel-step${key === step ? ' is-active' : ''}${done[key] ? ' is-done' : ''}`} onClick={() => { setStep(key); setTool('select'); }} aria-current={key === step ? 'step' : undefined}>
+              <button key={key} type="button" className={`gel-step${key === step ? ' is-active' : ''}${done[key] ? ' is-done' : ''}`} onClick={() => goStep(key)} aria-current={key === step ? 'step' : undefined}>
                 <span className="gel-step-num">{done[key] && key !== step ? <CheckIcon size={12} /> : i + 1}</span>{label}
               </button>
             ))}
@@ -206,19 +302,21 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
           <div className="gel-step-panel">
             <StepPanel ctx={ctx} />
             {stepIndex < STEPS.length - 1 && (
-              <button type="button" className="btn gel-next" onClick={() => { setStep(STEPS[stepIndex + 1][0]); setTool('select'); }}>
+              <button type="button" className="btn gel-next" onClick={() => goStep(STEPS[stepIndex + 1][0])}>
                 Étape suivante : {STEPS[stepIndex + 1][1]} <ChevronRight size={15} />
               </button>
             )}
           </div>
-          {results.warnings.length > 0 && step !== 'figure' && (
+          </>
+          )}
+          {results.warnings.length > 0 && (quick || step !== 'figure') && (
             <ul className="gel-warnings" aria-label="Avertissements">
               {results.warnings.map((w) => <li key={w}>{w}</li>)}
             </ul>
           )}
         </aside>
         <main className="gel-wb-main">
-          {step === 'figure' && tool !== 'annotate'
+          {!quick && step === 'figure' && tool !== 'annotate'
             ? <FigurePreview state={state} img={img} profiles={profiles} results={results} />
             : (
               <GelCanvas
@@ -232,10 +330,11 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
                 onSelectLane={setActiveLaneId}
                 hoverPos={hoverPos}
                 onHover={setHoverPos}
-                showRegion={step === 'lanes'}
-                showBands={step === 'sizes' || step === 'bands' || step === 'figure'}
-                showGrid={step === 'image' && tool !== 'crop'}
+                showRegion={!quick && step === 'lanes'}
+                showBands={quick || step === 'sizes' || step === 'bands' || step === 'figure'}
+                showGrid={(quick ? anglePreview !== null : step === 'image') && tool !== 'crop'}
                 cropRect={state.prep.crop}
+                previewRotation={anglePreview === null ? 0 : anglePreview - (state.prep.angle ?? 0)}
                 activeWarpId={activeWarpId}
                 onLaneAdd={onLaneAdd}
                 onLaneChange={onLaneChange}
@@ -252,11 +351,14 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
         </main>
         {showDetails && (
           <aside className="gel-wb-details">
-            <LaneDetails
+            <AnalysisPanel
               state={state}
+              update={update}
+              commit={commit}
               profiles={profiles}
               results={results}
               activeLaneId={activeLaneId}
+              setActiveLaneId={setActiveLaneId}
               hoverPos={hoverPos}
               onHover={setHoverPos}
               onPick={onPick}
@@ -265,6 +367,7 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
             />
           </aside>
         )}
+        {showDetails && <div className="gel-resize" onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label="Largeur du panneau d’analyse" title="Glisser pour élargir le panneau d’analyse" />}
       </div>
       {laddersOpen && (
         <Modal title="Marqueurs de taille" onClose={() => setLaddersOpen(false)} wide>

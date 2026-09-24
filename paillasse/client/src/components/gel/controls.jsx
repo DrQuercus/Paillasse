@@ -15,7 +15,6 @@ export function Range({ label, value, min, max, step = 1, onChange, onCommit, fo
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         onPointerUp={onCommit}
-        onKeyUp={onCommit}
       />
       {hint && <small className="hint">{hint}</small>}
     </div>
