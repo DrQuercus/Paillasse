@@ -5,6 +5,7 @@ import { query } from '../db.js';
 import { renderEntryPage } from '../lib/render.js';
 import { blobPath } from '../lib/storage.js';
 import { toGenbank } from '../lib/seq/genbank.js';
+import { SAMPLE_TYPES, locationText, posLabel, unitPath } from '../lib/inventory.js';
 
 const router = Router();
 
@@ -28,14 +29,27 @@ sequences/     Chaque séquence du registre en GenBank (copie de travail), ses v
                figées (versions/) et les fichiers importés d'origine (originaux/).
                Données complètes au format paillasse-seq/1 dans data.json (rubrique sequences).
 tableaux/      Les images des tableaux de post-it (post-it et fils dans data.json, rubrique boards).
+stockage.csv   Chaque tube en place : code, nom, emplacement complet (appareil › étagère › rack › boîte › position).
 
 Vérifier un fichier :  sha256sum files/<fichier>
 `;
 
+/** Tubes en place, au format CSV (séparateur ; et BOM : Excel l'ouvre tel quel). */
+export function storageCsv(units, samples) {
+  const byId = new Map(units.map((u) => [u.id, u]));
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const head = ['Code', 'Nom', 'Type', 'Emplacement', 'Position', 'Concentration', 'Volume', 'Aliquot', 'Congelé le', 'Périme le', 'Décongélations', 'Sorti du froid'];
+  const rows = samples.filter((s) => !s.archived).map((s) => [
+    s.code, s.name, SAMPLE_TYPES[s.type]?.label ?? s.type, s.unit_id ? locationText(unitPath(byId, s.unit_id)) : '', posLabel(s.row, s.col),
+    s.concentration, s.volume, s.aliquot, s.frozen_on ?? '', s.expires_on ?? '', s.thaw_count, s.status === 'out' ? 'oui' : '',
+  ]);
+  return `\uFEFF${[head, ...rows].map((r) => r.map(cell).join(';')).join('\r\n')}\r\n`;
+}
+
 // Export complet : ne dépend pas de l'application pour être relu
 router.get('/', async (req, res) => {
   const [projects, templates, entries, versions, attachments, users, boardNotes, boardLinks, boardImages,
-    sequences, sequenceVersions, sequenceFiles] = await Promise.all([
+    sequences, sequenceVersions, sequenceFiles, storageUnits, samples, sampleEvents] = await Promise.all([
     query(`SELECT id, name, description, color, archived, created_by, created_at, updated_at
            FROM projects ORDER BY created_at`),
     query('SELECT * FROM templates ORDER BY created_at'),
@@ -52,6 +66,9 @@ router.get('/', async (req, res) => {
     query('SELECT * FROM sequences ORDER BY code'),
     query('SELECT * FROM sequence_versions ORDER BY sequence_id, version_number'),
     query('SELECT * FROM sequence_files ORDER BY created_at'),
+    query('SELECT * FROM storage_units ORDER BY created_at'),
+    query('SELECT * FROM samples ORDER BY code'),
+    query('SELECT * FROM sample_events ORDER BY sample_id, created_at'),
   ]).then((results) => results.map((r) => r.rows));
 
   const fileNames = new Map(attachments.map((a) => [a.id, `${a.id}_${a.filename.replace(/[/\\]/g, '_')}`]));
@@ -80,9 +97,12 @@ router.get('/', async (req, res) => {
       exported_at: new Date().toISOString(), format: 'paillasse/1', users, projects, templates, entries, versions, attachments,
       boards: { notes: boardNotes, links: boardLinks, images: boardImages },
       sequences: { format: 'paillasse-seq/1', working_copies: sequences, versions: sequenceVersions, original_files: sequenceFiles },
+      storage: { units: storageUnits, samples, events: sampleEvents },
     }, null, 2),
     { name: 'data.json' },
   );
+  // Où est chaque tube, lisible sans l'application (tableur)
+  archive.append(storageCsv(storageUnits, samples), { name: 'stockage.csv' });
   for (const e of entries) {
     const version = e.status === 'locked' ? lastVersion.get(e.id) : null;
     const html = renderEntryPage({

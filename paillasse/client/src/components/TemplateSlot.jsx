@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Node, NodeViewWrapper, ReactNodeViewRenderer, mergeAttributes } from '@tiptap/react';
-import { Calculator, ChartColumn, Columns4, Dna, ImagePlus, X } from 'lucide-react';
+import { Calculator, ChartColumn, Columns4, Dna, ImagePlus, TestTube, X } from 'lucide-react';
 
 /** Outils qu'un emplacement de modèle peut ouvrir. */
 export const SLOT_TOOLS = {
@@ -9,6 +9,7 @@ export const SLOT_TOOLS = {
   calc: { Icon: Calculator, name: 'Calcul', action: 'Calculer…' },
   image: { Icon: ImagePlus, name: 'Photo ou fichier', action: 'Ajouter…' },
   sequence: { Icon: Dna, name: 'Séquence du registre', action: 'Choisir…' },
+  samples: { Icon: TestTube, name: 'Tubes à ranger', action: 'Ranger les tubes…' },
 };
 
 const newSlotId = () => `slot-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

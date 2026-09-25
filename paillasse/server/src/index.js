@@ -20,6 +20,7 @@ import toolRoutes from './routes/tools.js';
 import reagentRoutes from './routes/reagents.js';
 import ladderRoutes from './routes/ladders.js';
 import datasetRoutes from './routes/datasets.js';
+import inventoryRoutes from './routes/inventory.js';
 import { ownerBoard, sharedBoard } from './routes/board.js';
 
 if (config.sessionSecret.length < 32) {
@@ -51,6 +52,7 @@ api.use('/tools', toolRoutes);
 api.use('/reagents', reagentRoutes);
 api.use('/ladders', ladderRoutes);
 api.use('/datasets', datasetRoutes);
+api.use('/inventory', inventoryRoutes);
 api.use('/', attachmentRoutes);
 api.use((_req, res) => res.status(404).json({ error: 'Route inconnue' }));
 app.use('/api', api);

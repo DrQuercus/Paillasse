@@ -20,6 +20,7 @@ import TemplateEditPage from './pages/TemplateEditPage.jsx';
 const CalcPage = lazy(() => import('./pages/CalcPage.jsx'));
 const GelPage = lazy(() => import('./pages/GelPage.jsx'));
 const StatsPage = lazy(() => import('./pages/StatsPage.jsx'));
+const StoragePage = lazy(() => import('./pages/StoragePage.jsx'));
 
 function EntryRoute() {
   const { id } = useParams();
@@ -99,6 +100,8 @@ export default function App() {
             <Route path="/gels/:tab" element={<Suspense fallback={null}><GelPage /></Suspense>} />
             <Route path="/stats" element={<Suspense fallback={null}><StatsPage /></Suspense>} />
             <Route path="/stats/:id" element={<Suspense fallback={null}><StatsPage /></Suspense>} />
+            <Route path="/storage" element={<Suspense fallback={null}><StoragePage /></Suspense>} />
+            <Route path="/storage/:id" element={<Suspense fallback={null}><StoragePage /></Suspense>} />
             <Route path="/calc" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
             <Route path="/calc/:kind" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
             <Route path="/templates" element={<TemplatesPage />} />

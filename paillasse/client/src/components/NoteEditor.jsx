@@ -13,6 +13,7 @@ import { newSlot } from './TemplateSlot.jsx';
 const CalcDialog = lazy(() => import('./calc/CalcDialog.jsx'));
 const GelEditorSession = lazy(() => import('./gel/GelEditorSession.jsx'));
 const StatEditorSession = lazy(() => import('./stats/StatEditorSession.jsx'));
+const SampleSession = lazy(() => import('./storage/SampleSession.jsx'));
 
 // Formats que tous les navigateurs savent afficher dans la page
 const DISPLAYABLE = /^image\/(png|jpe?g|gif|webp|avif|bmp)$/i;
@@ -127,6 +128,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
   const [insertingCalc, setInsertingCalc] = useState(null); // { preset?, slot? }
   const [gelSession, setGelSession] = useState(null); // { attrs?, apply?, attachmentId?, filename?, insertAt?, mode?, slot? }
   const [statSession, setStatSession] = useState(null); // { attrs?, apply?, table?, dataset?, slot? }
+  const [sampleSession, setSampleSession] = useState(null); // { preset?, slot? }
   const slotFileInput = useRef(null);
   const slotForFiles = useRef(null);
 
@@ -218,6 +220,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
         else if (attrs.tool === 'stats') setStatSession({ dataset: attrs.preset?.dataset, slot });
         else if (attrs.tool === 'calc') setInsertingCalc({ preset: attrs.preset, slot });
         else if (attrs.tool === 'sequence') setPickingSequence({ slot });
+        else if (attrs.tool === 'samples') setSampleSession({ preset: attrs.preset ?? {}, slot });
         else { slotForFiles.current = slot; slotFileInput.current?.click(); }
       } : null;
       if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta('templateSlotMode', canUploadNow));
@@ -295,6 +298,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
           onInsertCalc={() => setInsertingCalc({})}
           onInsertGel={canUpload ? () => setGelSession({}) : undefined}
           onInsertStats={canUpload ? () => setStatSession({ table: tableAtCursor() }) : undefined}
+          onInsertSamples={canUpload ? () => setSampleSession({}) : undefined}
           onInsertSlot={templateMode ? (tool) => insertBlock(editor, newSlot(tool)) : undefined}
         />
       )}
@@ -384,6 +388,19 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
                 if (pos !== null) { editor.chain().focus().insertContentAt(pos, node).run(); placeCursorBelow(editor); return; }
               }
               insertBlock(editor, node);
+            }}
+          />
+        </Suspense>
+      )}
+      {sampleSession && (
+        <Suspense fallback={null}>
+          <SampleSession
+            session={sampleSession}
+            entryId={entryId}
+            onClose={() => setSampleSession(null)}
+            onInsert={(attrs) => {
+              const node = { type: 'sampleRef', attrs };
+              if (!replaceSlot(editor, sampleSession.slot, node)) insertBlock(editor, node);
             }}
           />
         </Suspense>

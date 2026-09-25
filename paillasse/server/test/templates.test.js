@@ -28,7 +28,7 @@ test('bibliothèque : modèles attendus, slugs uniques, documents valides', () =
 });
 
 test('bibliothèque : encarts de calcul lisibles, emplacements bien formés, tableaux rectangulaires', () => {
-  const tools = new Set(['gel', 'stats', 'calc', 'image', 'sequence']);
+  const tools = new Set(['gel', 'stats', 'calc', 'image', 'sequence', 'samples']);
   for (const t of lib) {
     walk(t.content, (n) => {
       if (n.type === 'labCalc') {

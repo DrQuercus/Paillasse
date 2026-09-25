@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditorState } from '@tiptap/react';
 import {
   Bold, Calculator, ChartColumn, ChevronDown, Code, Columns4, Dna, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListChecks, ListOrdered,
-  Minus, Paperclip, Quote, Redo2, SquareCode, SquareDashed, Strikethrough, Subscript, Superscript, Table,
+  Minus, Paperclip, Quote, Redo2, SquareCode, SquareDashed, Strikethrough, Subscript, Superscript, Table, TestTube,
   Underline, Undo2,
 } from 'lucide-react';
 import { SLOT_TOOLS } from './TemplateSlot.jsx';
@@ -114,7 +114,7 @@ function SlotMenu({ onInsertSlot }) {
   );
 }
 
-export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc, onInsertGel, onInsertStats, onInsertSlot }) {
+export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc, onInsertGel, onInsertStats, onInsertSamples, onInsertSlot }) {
   const imageInput = useRef(null);
   const fileInput = useRef(null);
 
@@ -211,6 +211,7 @@ export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onI
           {onInsertSequence && <Btn label="Insérer une séquence du registre" onClick={onInsertSequence}><Dna size={16} /></Btn>}
           {onInsertGel && <Btn label="Insérer une figure de gel (SDS-PAGE, western blot, ADN)" onClick={onInsertGel}><Columns4 size={16} /></Btn>}
           {onInsertStats && <Btn label="Graphique et statistiques (test t, ANOVA, régression…) ; dans un tableau : l’analyser" onClick={onInsertStats}><ChartColumn size={16} /></Btn>}
+          {onInsertSamples && <Btn label="Tubes : ranger de nouveaux tubes au congélateur, ou citer ceux du stockage" onClick={onInsertSamples}><TestTube size={16} /></Btn>}
           <input ref={imageInput} type="file" accept="image/*" multiple hidden onChange={pick(imageInput)} />
           <input ref={fileInput} type="file" multiple hidden onChange={pick(fileInput)} />
           {uploading > 0 && <span className="tool-status">Envoi de {uploading} fichier{uploading > 1 ? 's' : ''}…</span>}

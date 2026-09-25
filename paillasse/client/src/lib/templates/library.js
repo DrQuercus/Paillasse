@@ -171,6 +171,7 @@ const pcr = {
     p(),
     h2('Suite'),
     tasks('Purifier le produit (colonne ou extraction sur gel)', 'Doser', 'Stocker à −20 °C'),
+    slot('pcr-tubes', 'samples', 'Produit de PCR rangé', 'Tube(s) au congélateur, avec leur adresse', { type: 'dna', name: 'Produit PCR' }),
   ],
 };
 
@@ -222,6 +223,7 @@ const clonage = {
     h2('Conclusion'),
     p(),
     tasks('Envoyer au séquençage', 'Enregistrer la séquence vérifiée dans le registre', 'Stock glycérol à −80 °C'),
+    slot('clonage-glycerol', 'samples', 'Stock glycérol du clone validé', 'Rangé à −80 °C, lié à cette entrée', { type: 'strain', name: '' }),
   ],
 };
 
@@ -294,7 +296,7 @@ const miniprep = {
     fiche([['Digestion de contrôle'], ['Séquençage', 'n° de commande'], ['Résultat']]),
     slot('miniprep-gel', 'gel', 'Gel de digestion de contrôle', '', { mode: 'dna' }),
     h2('Stockage'),
-    fiche([['Emplacement', '−20 °C, boîte, position']]),
+    slot('miniprep-tubes', 'samples', 'Plasmides rangés', 'Un tube par clone, dans une boîte à −20 °C', { type: 'plasmid', name: '' }),
   ],
 };
 
@@ -419,6 +421,7 @@ const expression = {
     slot('expression-gel', 'gel', 'Gel d’expression', 'SDS-PAGE : bande attendue à la bonne taille ?', { mode: 'protein' }),
     h2('Résultat'),
     fiche([['Masse du culot (g)'], ['Expression', 'soluble / corps d’inclusion'], ['Remarques']]),
+    slot('expression-culot', 'samples', 'Culot rangé à −80 °C', 'Ou passez directement à la purification', { type: 'other', name: 'Culot' }),
   ],
 };
 
@@ -506,8 +509,8 @@ const purification = {
       ['Aliquots', 'nombre × volume'],
       ['Tampon final'],
       ['Conservation', 'congélation rapide dans l’azote liquide, −80 °C'],
-      ['Emplacement'],
     ]),
+    slot('purification-aliquots', 'samples', 'Aliquots rangés', 'Tous les aliquots d’un coup, aux places libres qui se suivent', { type: 'protein', name: '' }),
   ],
 };
 

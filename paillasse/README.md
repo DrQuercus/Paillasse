@@ -144,6 +144,26 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   scellés, imprimés, exportés et trouvés par la recherche. « Modifier » rouvre l'atelier tant que l'entrée est
   un brouillon ; une fois verrouillée, « Reprendre » copie les données dans un nouveau jeu de la page
   Statistiques.
+- **Stockage des échantillons** (menu « Stockage ») : chaque tube a une adresse, comme une rue et un numéro.
+  Le labo est dessiné : pièces, congélateurs −80 °C et −20 °C (armoire ou coffre), réfrigérateurs, cuves d'azote
+  liquide, armoires, dont la porte s'ouvre au survol ; dedans, étagères, racks (ou tours de cuve) et boîtes,
+  créés d'un coup à l'installation (« 5 étagères × 4 racks × 5 boîtes de 9 × 9 ») puis réorganisés par
+  glisser-déposer. Une boîte s'affiche en grand, avec son **coin coupé = A1** et des bouchons de couleur (par type
+  ou choisie) : un clic sur une case vide range un ou plusieurs tubes (les aliquots vont aux places libres
+  suivantes, montrées avant de valider), un tube se glisse vers une autre case (sur un autre tube : échange),
+  Ctrl+clic ou Maj+clic en prend plusieurs (sortir, remettre, recolorer, déplacer vers une autre boîte, jeter).
+  Chaque tube a sa fiche : code (ECH-0001…), type, concentration, volume, dates de congélation et de péremption,
+  décongélations comptées, séquence du registre, entrée d'origine, et tout son historique (rangé, déplacé, sorti,
+  remis, jeté : qui et quand). Un tube **sorti** garde sa place, dessinée en pointillé. **« Où est… ? »** trouve un
+  tube par son nom, son code ou son plasmide (une douchette qui tape le code puis Entrée marche aussi) : le chemin
+  s'allume et le tube clignote dans sa boîte. La page d'accueil du stockage liste **ce qu'il faut surveiller** :
+  tubes oubliés hors du froid depuis plus de 2 h, périmés ou bientôt périmés, décongelés 3 fois ou plus, boîtes
+  presque pleines, et l'activité récente. On colle le plan d'une boîte depuis Excel (grille ou liste
+  « position, nom »), et on imprime son plan pour le couvercle.
+- **Tubes dans une entrée** : bouton « Tubes » de la barre d'outils, ou emplacement « Tubes à ranger » des modèles
+  (purification, miniprep, PCR, expression, clonage). Les tubes rangés depuis une entrée gardent le lien vers elle ;
+  l'encart note leur adresse du jour (aliquots regroupés : « ×8, B2 à B9 ») et son lien mène là où le tube est
+  aujourd'hui. On peut aussi citer des tubes déjà rangés. Imprimé et trouvé par la recherche.
 - **Modèles** (menu « Modèles ») : 18 modèles de base installés d'office, rangés par catégorie :
   *Général* (entrée classique, protocole, réunion, préparation d'un tampon), *Biologie moléculaire* (PCR, clonage,
   transformation, miniprep, gel d'agarose, RT-qPCR), *Protéines* (expression, purification His-tag / Ni-NTA,
@@ -355,9 +375,10 @@ server/
   src/lib/gel.js               encart de figure de gel : vérification, rendu imprimable, texte de recherche
   src/lib/stat.js              encart de graphique statistique : vérification, rendu imprimable, texte de recherche
   src/lib/templates.js         modèles de base : installation au démarrage, mise à jour s'ils sont intacts
+  src/lib/inventory.js         stockage : qui contient quoi, positions A1, chemins, validation (copié côté client)
   src/lib/template-library.json  modèles de base (généré par npm --prefix client run templates)
   src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
-                               jeux de données statistiques
+                               jeux de données statistiques, stockage (inventory)
   scripts/create-user.js       créer un compte ou changer un mot de passe
 client/
   src/pages/EntryPage.jsx      édition d'une entrée : autosave, versions, verrou
@@ -374,6 +395,9 @@ client/
   src/lib/templates/           modèles de base (library.js) et constructeurs de documents
   src/components/TemplateSlot.jsx  emplacement à remplir (figure de gel, graphique, calcul, photo, séquence)
   src/pages/TemplatesPage.jsx  galerie des modèles ; TemplateEditPage.jsx : édition
+  src/lib/inventory.js         stockage côté interface (inventory-core.js = copie conforme du serveur, testée)
+  src/components/storage/      labo dessiné, intérieur des appareils, boîte, fiche du tube, encart « Tubes »
+  src/pages/StoragePage.jsx    page Stockage
 deploy/                        service systemd, sauvegarde et son timer
 ```
 

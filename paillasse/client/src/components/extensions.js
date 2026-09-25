@@ -13,6 +13,7 @@ import { LabCalcNode } from './calc/LabCalcNode.jsx';
 import { GelFigureNode } from './gel/GelFigureNode.jsx';
 import { StatFigureNode } from './stats/StatFigureNode.jsx';
 import { TemplateSlotNode } from './TemplateSlot.jsx';
+import { SampleRefNode } from './storage/SampleRefNode.jsx';
 
 export const IMAGE_SIZES = [25, 50, 75, 100];
 
@@ -80,5 +81,6 @@ export function buildExtensions({ placeholder } = {}) {
     GelFigureNode,
     StatFigureNode,
     TemplateSlotNode,
+    SampleRefNode,
   ];
 }

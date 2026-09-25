@@ -2,6 +2,7 @@
 import { calcSummary } from './calc.js';
 import { gelImages, gelLayout, gelSummary, panelWidths } from './gel.js';
 import { statImages, statSummary } from './stat.js';
+import { sampleRefList, sampleRefTitle } from './inventory.js';
 
 export const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -55,6 +56,15 @@ function renderCalc(raw) {
     + `${pairs(s.inputs, 'calc-inputs')}${table}${pairs(s.results, 'calc-results')}`
     + `${s.notes.map((n) => `<p class="calc-note">${escapeHtml(n)}</p>`).join('')}`
     + `${s.formula ? `<p class="calc-formula">${escapeHtml(s.formula)}</p>` : ''}</section>`;
+}
+
+/** Tubes rangés ou cités : code, nom, emplacement au moment de l'entrée. */
+function renderSampleRef(attrs) {
+  const list = sampleRefList(attrs);
+  if (!list.length) return '';
+  const rows = list.map((t) => `<tr><td>${escapeHtml(t.code)}</td><td>${escapeHtml(t.name)}${t.aliquot ? ` (${escapeHtml(t.aliquot)})` : ''}</td><td>${escapeHtml(t.location)}</td></tr>`).join('');
+  return `<section class="calc samples"><p class="calc-head"><strong>${escapeHtml(sampleRefTitle(attrs))}</strong> — ${list.length} tube${list.length > 1 ? 's' : ''}</p>`
+    + `<table class="calc-table"><thead><tr><th>Code</th><th>Tube</th><th>Emplacement</th></tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 
 /** Figure de gel : images (pièces jointes) puis tableau des bandes et notes. */
@@ -127,6 +137,7 @@ export function renderDoc(doc, options = {}) {
       case 'gelFigure': return renderGel(a, opts.rewriteUrl);
       case 'statFigure': return renderStat(a, opts.rewriteUrl);
       case 'templateSlot': return ''; // emplacement de modèle resté vide : rien à imprimer
+      case 'sampleRef': return renderSampleRef(a);
       case 'table': return `<table>${children(node)}</table>`;
       case 'tableRow': return `<tr>${children(node)}</tr>`;
       case 'tableHeader': return `<th${cellAttrs(a)}>${children(node)}</th>`;

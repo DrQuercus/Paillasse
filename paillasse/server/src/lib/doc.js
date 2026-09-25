@@ -2,6 +2,7 @@
 import { calcToText } from './calc.js';
 import { gelToText } from './gel.js';
 import { statToText } from './stat.js';
+import { sampleRefText } from './inventory.js';
 
 export const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
 
@@ -26,6 +27,7 @@ export function docToPlainText(doc) {
     else if (node.type === 'labCalc') out.push(`\n${calcToText(node.attrs?.summary)}\n`);
     else if (node.type === 'gelFigure') out.push(`\n${gelToText(node.attrs)}\n`);
     else if (node.type === 'statFigure') out.push(`\n${statToText(node.attrs)}\n`);
+    else if (node.type === 'sampleRef') out.push(`\n${sampleRefText(node.attrs)}\n`);
     else if (node.type === 'tableCell' || node.type === 'tableHeader') {
       (node.content ?? []).forEach(walk);
       out.push('\t');
