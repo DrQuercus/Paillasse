@@ -205,7 +205,7 @@ export async function listDumps(target) {
 // --- Sauvegarde --------------------------------------------------------------------------------------
 
 const pad = (n) => String(n).padStart(2, '0');
-const stampOf = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+export const stampOf = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 
 /** Fichiers du stockage : [{ rel: 'ab/abcd…', abs, size }]. */
 export async function walkBlobs(dir = blobsDir) {

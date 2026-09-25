@@ -254,6 +254,16 @@ export default function BackupsTab({ maintenance, onMaintenance }) {
       notify(err.message, 'error');
     }
   };
+  const removeSafety = async (s) => {
+    if (!window.confirm(`Supprimer la copie de sécurité ${s.name} ? On ne pourra plus revenir à cet état.`)) return;
+    try {
+      await api.del(`/admin/files/safety/${encodeURIComponent(s.name)}`);
+      notify('Copie de sécurité supprimée.', 'success');
+      load();
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+  };
   const makeKey = async () => {
     try {
       const r = await api.post('/admin/backups/ssh-key');
@@ -367,8 +377,8 @@ export default function BackupsTab({ maintenance, onMaintenance }) {
         )}
       </Card>
 
-      <Card title="Copies de sécurité (avant restauration)" icon={RotateCcw}>
-        {safety.length === 0 ? <p className="muted small">Aucune : une copie de la base est prise automatiquement avant chaque restauration.</p> : (
+      <Card title="Copies de sécurité (avant restauration ou suppression)" icon={RotateCcw}>
+        {safety.length === 0 ? <p className="muted small">Aucune : une copie de la base est prise automatiquement avant chaque restauration et chaque suppression.</p> : (
           <table className="adm-table">
             <thead><tr><th>Copie</th><th>Date</th><th>Taille</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
@@ -380,6 +390,7 @@ export default function BackupsTab({ maintenance, onMaintenance }) {
                   <td className="adm-actions">
                     <a className="btn btn-small btn-ghost" href={`/api/admin/files/safety/${encodeURIComponent(s.name)}`} download><Download size={14} /> Télécharger</a>
                     <button type="button" className="btn btn-small" onClick={() => setRestoreSafety({ label: s.name, date: s.date, body: { safety: true, dump: s.name } })}><RotateCcw size={14} /> Revenir à cette copie…</button>
+                    <button type="button" className="icon-btn adm-danger" title="Supprimer cette copie" aria-label={`Supprimer ${s.name}`} onClick={() => removeSafety(s)}><Trash2 size={15} /></button>
                   </td>
                 </tr>
               ))}

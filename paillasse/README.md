@@ -208,8 +208,12 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
     **mode maintenance** : les autres comptes voient une page d'attente avec votre message, rien ne s'écrit.
   - *Comptes* : créer un compte (mot de passe provisoire affiché une seule fois, la personne choisit le sien à la
     première connexion), réinitialiser un mot de passe, déconnecter de tous ses appareils, rendre administrateur,
-    désactiver ou réactiver. Un compte ne se supprime jamais : ses entrées restent signées de son nom ; il reste
-    toujours au moins un administrateur actif. Chacun peut changer son mot de passe (icône clé, en bas à gauche).
+    désactiver ou réactiver, **supprimer** : le compte ne peut plus se connecter, son identifiant est libéré et son
+    mot de passe effacé ; au choix ses entrées restent signées de son nom (ou « Compte supprimé » : anonymisé), ou
+    elles partent avec lui (entrées, séquences, jeux de données, modèles, post-it ; ses tubes restent au stockage,
+    ses projets partagés reviennent à l'administrateur). Un compte dont plus rien ne porte le nom s'efface
+    entièrement. Il reste toujours au moins un administrateur actif. Chacun peut changer son mot de passe (icône
+    clé, en bas à gauche).
   - *Sauvegardes* : destinations vers un dossier du serveur (NAS monté, disque externe) ou une autre machine par
     SSH (clé de Paillasse créée et affichée dans la page, à ajouter dans `authorized_keys`), chaque jour à l'heure
     choisie ou à la demande, nombre de dumps gardés ; « Tester » vérifie l'écriture et la place libre (et prévient
@@ -221,6 +225,14 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
     (en cas d'erreur rien ne change), fichiers absents recopiés, schéma remis à niveau ; les destinations,
     l'historique des sauvegardes et le journal d'administration sont conservés. « Revenir à cette copie » annule
     une restauration.
+  - *Données* : **suppression définitive** d'entrées (filtrées par projet, auteur, état, date ; même verrouillées,
+    avec leurs addenda, versions figées et pièces jointes), de projets entiers, de séquences, d'appareils du
+    stockage avec leur contenu, de tubes retirés, de jeux de données, produits, marqueurs et modèles (un modèle de
+    base est retiré, sinon il reviendrait à la mise à jour suivante). Chaque suppression montre d'abord ce qui part
+    et ce qui reste, se confirme en tapant « SUPPRIMER », prend une copie de sécurité de la base (« Revenir à
+    cette copie » l'annule) et s'inscrit dans le journal d'administration. Raccourci « Supprimer » (corbeille) sur
+    la page d'une entrée et d'un projet, pour les administrateurs. Les fichiers joints restent sur le disque jusqu'à
+    « Effacer les fichiers orphelins » (Fichiers) ; les copies de sécurité se suppriment aussi.
   - *Base de données* : version, taille, tables, migrations ; **vérification d'intégrité de tout le cahier**
     (empreintes et chaînes de chaque version figée, entrées et séquences, fichiers relus) ; optimisation
     (`VACUUM ANALYZE`) ; téléchargement d'une copie `.dump` ; **console SQL en lecture seule** (une instruction,
@@ -237,6 +249,10 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
 
 Côté base de données, les tables `entry_versions` et `attachments` sont en ajout seul et une entrée
 verrouillée ne peut plus changer : des triggers PostgreSQL refusent toute modification, même en SQL direct.
+Seule exception : la suppression définitive par un administrateur (page Maintenance), faite par le serveur dans
+une transaction marquée (`SET LOCAL paillasse.purge = 'on'`), après copie de sécurité, et toujours d'un bloc
+(une entrée avec toutes ses versions, jamais une version isolée) : ce qui reste garde des empreintes valides.
+Le journal d'administration, lui, ne se modifie ni ne s'efface jamais.
 
 ## Prérequis
 
@@ -434,6 +450,8 @@ server/
   migrations/011_cryoem.sql    cryo-EM : canister, puck, boîte à grilles (format, case, capacité), conditions des grilles
   migrations/012_admin.sql     administrateurs, comptes désactivés, sessions révocables, journal d'administration,
                                réglages (mode maintenance), destinations et historique des sauvegardes
+  migrations/013_admin_purge.sql  suppression administrateur (garde-fous levés par SET LOCAL seulement),
+                               journal inviolable, comptes supprimés
   src/index.js                 point d'entrée Express, sert aussi client/dist
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
@@ -445,6 +463,8 @@ server/
   src/lib/inventory.js         stockage : qui contient quoi, positions A1, chemins, validation (copié côté client)
   src/lib/backup.js            sauvegardes (dossier ou SSH), planification, restauration atomique, clé SSH
   src/lib/jobs.js              tâches longues suivies par la page Maintenance ; settings.js, serverLog.js
+  src/lib/purge.js             suppression définitive : aperçu (ce qui part, ce qui reste), entrées, projets,
+                               séquences, stockage, comptes
   src/routes/admin.js          page Maintenance : comptes, sauvegardes, base, fichiers, serveur (administrateurs)
   src/lib/template-library.json  modèles de base (généré par npm --prefix client run templates)
   src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
@@ -476,7 +496,9 @@ deploy/                        service systemd, sauvegarde et son timer
 
 ## Principes à garder pour la suite
 
-- Rien ne s'efface : on archive (`archived`), on ne supprime pas.
+- Au quotidien rien ne s'efface : on archive (`archived`). La suppression définitive est réservée aux
+  administrateurs (page Maintenance : aperçu, confirmation, copie de sécurité, journal) ; elle retire toujours
+  un tout (entrée avec ses versions, projet, compte), pour que le reste du cahier reste vérifiable.
 - Le contenu est du JSON ProseMirror ; le texte brut (`plain_text`) est recalculé côté serveur pour la recherche.
 - Les empreintes sont calculées sur du JSON canonique (clés triées), car `jsonb` réordonne les clés.
 - `created_by` est présent partout pour pouvoir passer au multi-utilisateur sans migration lourde.

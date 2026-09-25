@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Archive, FilePlus2, Pencil } from 'lucide-react';
+import { Archive, FilePlus2, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import EntryList from '../components/EntryList.jsx';
 import ProjectDialog from '../components/ProjectDialog.jsx';
 import ProjectTabs from '../components/ProjectTabs.jsx';
+import PurgeDialog from '../components/admin/PurgeDialog.jsx';
 
 export default function ProjectPage() {
   const { id } = useParams();
-  const { openNewEntry, notify, reloadProjects, projects } = useApp();
+  const { openNewEntry, notify, reloadProjects, projects, user } = useApp();
+  const [purging, setPurging] = useState(false);
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
   const [entries, setEntries] = useState(null);
@@ -54,11 +56,23 @@ export default function ProjectPage() {
           {!project.archived && (
             <button type="button" className="btn btn-ghost" onClick={archive}><Archive size={15} /> Archiver</button>
           )}
+          {user?.is_admin && (
+            <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setPurging(true)} title="Supprimer le projet et son contenu (administrateur)"><Trash2 size={15} /> Supprimer</button>
+          )}
           <button type="button" className="btn btn-primary" onClick={() => openNewEntry(id)}>
             <FilePlus2 size={16} /> Nouvelle entrée
           </button>
         </div>
       </header>
+      {purging && (
+        <PurgeDialog
+          kind="projects"
+          ids={[id]}
+          title={`Supprimer le projet « ${project.name} »`}
+          onClose={() => setPurging(false)}
+          onDone={() => { reloadProjects(); setTimeout(() => navigate('/'), 1200); }}
+        />
+      )}
 
       <ProjectTabs projectId={id} shared={project.board_shared} />
 

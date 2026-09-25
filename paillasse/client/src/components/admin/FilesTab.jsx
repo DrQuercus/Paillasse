@@ -21,6 +21,18 @@ export default function FilesTab() {
       notify(err.message, 'error');
     }
   };
+  const purgeOrphans = async () => {
+    const typed = window.prompt('Effacer du disque les fichiers que plus rien ne cite ? Une copie de sécurité ancienne qui les citait ne pourra plus les retrouver (sauf dans les sauvegardes). Tapez SUPPRIMER pour confirmer.');
+    if (typed === null) return;
+    try {
+      const r = await api.post('/admin/files/purge-orphans', { confirm: typed.trim() });
+      notify(`${r.removed} fichier(s) orphelin(s) effacé(s) (${formatBytes(r.bytes)}).`, 'success');
+      setJob(null);
+      load();
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+  };
   const cleanTmp = async () => {
     try {
       const r = await api.post('/admin/files/clean-tmp');
@@ -94,7 +106,12 @@ export default function FilesTab() {
                 </table>
               </>
             )}
-            {result.orphan_count > 0 && <p className="hint">Les fichiers orphelins (sur le disque mais cités nulle part, par exemple un envoi interrompu) ne gênent pas. Ils ne sont jamais effacés automatiquement.</p>}
+            {result.orphan_count > 0 && (
+              <div className="adm-orphans">
+                <p className="small">{result.orphan_count} fichier(s) orphelin(s) : sur le disque mais cités nulle part (entrée supprimée, envoi interrompu). Ils ne gênent pas et ne sont jamais effacés automatiquement ; les destinations de sauvegarde gardent leur copie.</p>
+                <button type="button" className="btn btn-small btn-danger-ghost" onClick={purgeOrphans}><Trash2 size={14} /> Effacer les fichiers orphelins du disque…</button>
+              </div>
+            )}
           </div>
         )}
       </Card>

@@ -18,7 +18,10 @@ import { getSetting, logAdmin, setSetting } from '../lib/settings.js';
 import { blobPath, blobsDir, tmpDir } from '../lib/storage.js';
 import { verifyEntry } from '../lib/versions.js';
 import {
-  checkDest, ensureSshKey, findTool, lastDue, listDumps, nextDue, parseDest, pgEnv, publicKey, safetyDir,
+  KINDS, anonymizeDeletedUser, cleanIds, deleteUser, forgetDeletedUser, purge, purgeImpact, userImpact,
+} from '../lib/purge.js';
+import {
+  checkDest, dumpDatabase, ensureSshKey, stampOf, findTool, lastDue, listDumps, nextDue, parseDest, pgEnv, publicKey, safetyDir,
   startBackup, startRestore, testTarget, toolStatus, walkBlobs,
 } from '../lib/backup.js';
 import { verifySequence } from './sequences.js';
@@ -57,7 +60,7 @@ router.get('/overview', async (_req, res) => {
     query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE disabled_at IS NULL)::int AS active,
                   count(*) FILTER (WHERE is_admin AND disabled_at IS NULL)::int AS admins,
                   count(*) FILTER (WHERE must_change_password AND disabled_at IS NULL)::int AS provisional
-           FROM users`),
+           FROM users WHERE deleted_at IS NULL`),
     query(`SELECT count(*)::int AS count, coalesce(sum(size_bytes), 0)::bigint AS bytes FROM (
              SELECT DISTINCT ON (sha256) sha256, size_bytes FROM (
                SELECT sha256, size_bytes FROM attachments UNION ALL SELECT sha256, size_bytes FROM board_images
@@ -122,8 +125,69 @@ router.get('/users', async (_req, res) => {
     SELECT u.id, u.username, u.display_name, u.is_admin, u.disabled_at, u.must_change_password, u.last_login_at, u.created_at,
            (SELECT count(*)::int FROM entries e WHERE e.created_by = u.id) AS entries,
            (SELECT max(e.updated_at) FROM entries e WHERE e.created_by = u.id) AS last_entry_at
-    FROM users u ORDER BY u.disabled_at IS NOT NULL, u.display_name`);
+    FROM users u WHERE u.deleted_at IS NULL ORDER BY u.disabled_at IS NOT NULL, u.display_name`);
   res.json(rows);
+});
+
+/** Comptes supprimés dont le nom signe encore des versions figées. */
+router.get('/users/deleted', async (_req, res) => {
+  const { rows } = await query(`
+    SELECT u.id, u.display_name, u.deleted_at,
+           (SELECT count(*)::int FROM entries e WHERE e.created_by = u.id) AS entries,
+           (SELECT count(*)::int FROM entry_versions v WHERE v.created_by = u.id)
+             + (SELECT count(*)::int FROM attachments a WHERE a.created_by = u.id)
+             + (SELECT count(*)::int FROM sequences s WHERE s.created_by = u.id)
+             + (SELECT count(*)::int FROM sequence_versions v WHERE v.created_by = u.id)
+             + (SELECT count(*)::int FROM sequence_files f WHERE f.created_by = u.id)
+             + (SELECT count(*)::int FROM projects p WHERE p.created_by = u.id) AS sealed
+    FROM users u WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC`);
+  res.json(rows);
+});
+
+router.get('/users/:id/impact', async (req, res) => {
+  const user = await loadUser(req.params.id);
+  res.json({ user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: user.is_admin }, ...(await userImpact(user.id)) });
+});
+
+/**
+ * Supprimer un compte : confirmation par son identifiant, copie de sécurité avant (conseillée).
+ * data : 'keep' (ses entrées restent, signées de son nom ou anonymisées) ou 'delete' (ses données partent avec lui).
+ */
+router.post('/users/:id/delete', async (req, res) => {
+  const user = await loadUser(req.params.id);
+  if (user.deleted_at) throw bad('Ce compte est déjà supprimé.');
+  if (user.id === req.user.id) throw bad('Vous ne pouvez pas supprimer votre propre compte.');
+  if (user.is_admin && !user.disabled_at && (await activeAdmins(user.id)) === 0) throw bad('Il faut garder au moins un administrateur actif.');
+  if (String(req.body?.confirm ?? '') !== user.username) throw bad(`Tapez l’identifiant « ${user.username} » pour confirmer.`);
+  const data = req.body?.data === 'delete' ? 'delete' : 'keep';
+  const anonymize = Boolean(req.body?.anonymize);
+  const job = startJob('purge', `Suppression du compte ${user.display_name}`, async (j) => {
+    if (req.body?.safety !== false) await safetyCopy(j);
+    j.log(data === 'delete' ? 'Suppression du compte et de ses données…' : 'Suppression du compte (ses entrées restent)…');
+    const r = await deleteUser(user.id, { data, anonymize, actorId: req.user.id });
+    const removed = Object.entries(r.removed).filter(([, n]) => n).map(([k, n]) => `${n} ${REMOVED_LABELS[k] ?? k}`);
+    j.log(removed.length ? `Supprimé : ${removed.join(', ')}.` : 'Aucune donnée supprimée.');
+    j.log(r.full ? 'Le compte a entièrement disparu.' : `Le compte est supprimé ; ${anonymize ? '« Compte supprimé »' : `le nom « ${user.display_name} »`} reste sur ses entrées et versions figées.`);
+    await logAdmin(req.user, 'Compte supprimé', `${user.username} (${user.display_name}) : ${data === 'delete' ? 'avec ses données' : 'données gardées'}${anonymize ? ', anonymisé' : ''}${removed.length ? ` ; ${removed.join(', ')}` : ''}`);
+    return { ...r, removed_text: removed };
+  }, { exclusive: 'backup', user: req.user });
+  res.status(202).json(getJob(job.id));
+});
+
+router.post('/users/:id/forget', async (req, res) => {
+  const user = await loadUser(req.params.id);
+  if (!user.deleted_at) throw bad('Supprimez d’abord le compte.');
+  await forgetDeletedUser(user.id);
+  await logAdmin(req.user, 'Compte effacé', `${user.display_name} : plus aucune trace dans la base`);
+  res.json({ ok: true });
+});
+
+router.post('/users/:id/anonymize', async (req, res) => {
+  const user = await loadUser(req.params.id);
+  if (!user.deleted_at) throw bad('Seul un compte supprimé s’anonymise.');
+  await anonymizeDeletedUser(user.id);
+  await logAdmin(req.user, 'Compte anonymisé', `${user.display_name} devient « Compte supprimé » sur ses entrées`);
+  res.json({ ok: true });
 });
 
 router.post('/users', async (req, res) => {
@@ -418,6 +482,33 @@ router.post('/files/clean-tmp', async (req, res) => {
   res.json({ removed, bytes });
 });
 
+router.delete('/files/safety/:name', async (req, res) => {
+  const name = path.basename(req.params.name);
+  const p = path.join(safetyDir, name);
+  if (!name.endsWith('.dump') || !fs.existsSync(p)) throw notFound('Copie de sécurité');
+  await fs.promises.unlink(p);
+  await logAdmin(req.user, 'Copie de sécurité supprimée', name);
+  res.json({ ok: true });
+});
+
+/** Fichiers que plus rien ne cite (entrées supprimées, envois interrompus) : effacés du disque. */
+router.post('/files/purge-orphans', async (req, res) => {
+  if (String(req.body?.confirm ?? '') !== 'SUPPRIMER') throw bad('Tapez SUPPRIMER pour confirmer.');
+  const { rows } = await query(REFERENCED_SQL);
+  const known = new Set(rows.map((r) => r.sha256));
+  let removed = 0;
+  let bytes = 0;
+  for (const b of await walkBlobs()) {
+    const sha = b.rel.split('/')[1];
+    if (known.has(sha) || !/^[0-9a-f]{64}$/.test(sha)) continue;
+    await fs.promises.unlink(b.abs);
+    removed += 1;
+    bytes += b.size;
+  }
+  await logAdmin(req.user, 'Fichiers orphelins supprimés', `${removed} fichier(s), ${Math.round(bytes / 1024)} Ko`);
+  res.json({ removed, bytes });
+});
+
 router.get('/files/safety/:name', async (req, res) => {
   const name = path.basename(req.params.name);
   const p = path.join(safetyDir, name);
@@ -589,6 +680,116 @@ router.post('/backups/restore', async (req, res) => {
   else source = { target: await loadTarget(req.body?.target_id) };
   const job = startRestore({ ...source, dumpName: dump }, req.user);
   await logAdmin(req.user, 'Restauration lancée', `${dump}${source.target ? ` depuis « ${source.target.name} »` : ' (copie de sécurité)'}`);
+  res.status(202).json(getJob(job.id));
+});
+
+// --- Données : parcourir et supprimer ----------------------------------------------------------------------
+
+const REMOVED_LABELS = {
+  entries: 'entrée(s)', versions: 'version(s) figée(s)', attachments: 'pièce(s) jointe(s)', projects: 'projet(s)', notes: 'post-it',
+  datasets: 'jeu(x) de données', sequences: 'séquence(s)', files: 'fichier(s) d’origine', units: 'contenant(s)', samples: 'tube(s)',
+  reagents: 'produit(s)', ladders: 'marqueur(s)', templates: 'modèle(s)', templates_retired: 'modèle(s) de base retiré(s)',
+};
+
+async function safetyCopy(job) {
+  job.log('Copie de sécurité de la base avant suppression…');
+  const file = path.join(safetyDir, `paillasse_avant-suppression_${stampOf()}.dump`);
+  await dumpDatabase(file, job);
+  job.log(`Copie de sécurité : ${path.basename(file)} (Sauvegardes › Copies de sécurité pour revenir en arrière).`);
+}
+
+router.get('/data/entries', async (req, res) => {
+  const where = [];
+  const params = [];
+  const add = (sql, v) => { params.push(v); where.push(sql.replace('$?', `$${params.length}`)); };
+  if (req.query.q) {
+    params.push(String(req.query.q));
+    where.push(`(e.title ILIKE '%' || $${params.length} || '%' OR e.plain_text ILIKE '%' || $${params.length} || '%')`);
+  }
+  if (req.query.project) add('e.project_id = $?', String(req.query.project));
+  if (req.query.author) add('e.created_by = $?', String(req.query.author));
+  if (req.query.status === 'draft' || req.query.status === 'locked') add('e.status = $?', req.query.status);
+  if (req.query.status === 'archived') where.push('e.archived');
+  if (req.query.before) add('e.entry_date < $?::date', String(req.query.before));
+  const { rows } = await query(`
+    SELECT e.id, e.title, e.entry_date, e.status, e.archived, e.updated_at, e.parent_entry_id,
+           p.name AS project, p.color AS project_color, u.display_name AS author, e.version_count AS versions,
+           (SELECT count(*)::int FROM attachments a WHERE a.entry_id = e.id) AS files
+    FROM entries e JOIN projects p ON p.id = e.project_id JOIN users u ON u.id = e.created_by
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 500`, params);
+  res.json(rows);
+});
+
+router.get('/data/projects', async (_req, res) => {
+  const { rows } = await query(`
+    SELECT p.id, p.name, p.color, p.archived, p.created_at, u.display_name AS owner,
+           (SELECT count(*)::int FROM entries e WHERE e.project_id = p.id) AS entries,
+           (SELECT count(*)::int FROM entries e WHERE e.project_id = p.id AND e.status = 'locked') AS locked,
+           (SELECT count(*)::int FROM sequences s WHERE s.project_id = p.id) AS sequences,
+           (SELECT count(*)::int FROM datasets d WHERE d.project_id = p.id) AS datasets,
+           (SELECT count(*)::int FROM board_notes n WHERE n.project_id = p.id AND n.deleted_at IS NULL) AS notes
+    FROM projects p JOIN users u ON u.id = p.created_by ORDER BY p.archived, p.name`);
+  res.json(rows);
+});
+
+router.get('/data/sequences', async (_req, res) => {
+  const { rows } = await query(`
+    SELECT s.id, s.code, s.name, s.archived, s.updated_at, p.name AS project, u.display_name AS author,
+           (SELECT count(*)::int FROM sequence_versions v WHERE v.sequence_id = s.id) AS versions
+    FROM sequences s JOIN users u ON u.id = s.created_by LEFT JOIN projects p ON p.id = s.project_id ORDER BY s.code`);
+  res.json(rows);
+});
+
+router.get('/data/storage', async (_req, res) => {
+  const { rows: units } = await query(`
+    WITH RECURSIVE t(root, id) AS (
+      SELECT id, id FROM storage_units WHERE parent_id IS NULL OR kind IN ('freezer', 'fridge', 'tank', 'cabinet')
+      UNION SELECT t.root, u.id FROM storage_units u JOIN t ON u.parent_id = t.id)
+    SELECT u.id, u.name, u.kind, u.archived, u.parent_id, pu.name AS parent,
+           (SELECT count(*)::int FROM t WHERE t.root = u.id) - 1 AS inside,
+           (SELECT count(*)::int FROM samples s WHERE s.unit_id IN (SELECT id FROM t WHERE t.root = u.id) AND NOT s.archived) AS samples
+    FROM storage_units u LEFT JOIN storage_units pu ON pu.id = u.parent_id
+    WHERE u.parent_id IS NULL OR u.kind IN ('freezer', 'fridge', 'tank', 'cabinet') OR u.archived
+    ORDER BY u.archived, u.parent_id IS NOT NULL, u.name`);
+  const { rows: gone } = await query(`
+    SELECT s.id, s.code, s.name, s.updated_at FROM samples s WHERE s.archived ORDER BY s.updated_at DESC LIMIT 1000`);
+  res.json({ units, discarded: gone });
+});
+
+router.get('/data/other', async (_req, res) => {
+  const [datasets, reagents, ladders, templates] = await Promise.all([
+    query("SELECT id, coalesce(nullif(title, ''), 'Sans titre') AS name, kind AS detail, archived, updated_at FROM datasets ORDER BY updated_at DESC"),
+    query("SELECT id, name, category AS detail, archived, updated_at FROM reagents ORDER BY name"),
+    query("SELECT id, name, CASE WHEN kind = 'dna' THEN 'ADN' ELSE 'protéines' END || CASE WHEN supplier <> '' THEN ' · ' || supplier ELSE '' END AS detail, archived, updated_at FROM ladders ORDER BY name"),
+    query("SELECT id, name, CASE WHEN slug IS NULL THEN 'modèle du labo' ELSE 'modèle de base' END AS detail, archived, updated_at FROM templates ORDER BY name"),
+  ]);
+  res.json({ datasets: datasets.rows, reagents: reagents.rows, ladders: ladders.rows, templates: templates.rows });
+});
+
+router.post('/purge/preview', async (req, res) => {
+  res.json(await purgeImpact(String(req.body?.kind ?? ''), req.body?.ids));
+});
+
+/** Suppression définitive : confirmation tapée, copie de sécurité avant (conseillée), une seule transaction. */
+router.post('/purge', async (req, res) => {
+  const kind = String(req.body?.kind ?? '');
+  if (!KINDS[kind]) throw bad('Type de données inconnu.');
+  if (String(req.body?.confirm ?? '') !== 'SUPPRIMER') throw bad('Tapez SUPPRIMER pour confirmer.');
+  const list = cleanIds(req.body?.ids);
+  if (!list.length) throw bad('Rien à supprimer.');
+  const impact = await purgeImpact(kind, list);
+  if (impact.blockers.length) throw bad(impact.blockers.join(' '));
+  const job = startJob('purge', `Suppression : ${impact.lines[0]}`, async (j) => {
+    if (req.body?.safety !== false) await safetyCopy(j);
+    j.log('Suppression (une seule transaction)…');
+    const r = await purge(kind, list);
+    const removed = Object.entries(r).filter(([, n]) => n).map(([k, n]) => `${n} ${REMOVED_LABELS[k] ?? k}`);
+    j.log(`Supprimé : ${removed.join(', ') || 'rien'}.`);
+    const names = impact.items.slice(0, 10).map((t) => `« ${t} »`).join(', ');
+    await logAdmin(req.user, 'Données supprimées', `${KINDS[kind].label} : ${removed.join(', ')}${names ? ` — ${names}${impact.items.length > 10 ? '…' : ''}` : ''}`);
+    return { removed: r, removed_text: removed };
+  }, { exclusive: 'backup', user: req.user });
   res.status(202).json(getJob(job.id));
 });
 

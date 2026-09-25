@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
-import { Archive, Database, HardDrive, LayoutDashboard, Server, Users, Wrench } from 'lucide-react';
+import { Archive, Database, Eraser, HardDrive, LayoutDashboard, Server, Users, Wrench } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import OverviewTab from '../components/admin/OverviewTab.jsx';
 import UsersTab from '../components/admin/UsersTab.jsx';
 import BackupsTab from '../components/admin/BackupsTab.jsx';
+import DataTab from '../components/admin/DataTab.jsx';
 import DatabaseTab from '../components/admin/DatabaseTab.jsx';
 import FilesTab from '../components/admin/FilesTab.jsx';
 import ServerTab from '../components/admin/ServerTab.jsx';
@@ -14,9 +15,10 @@ const TABS = [
   ['ensemble', 'Vue d’ensemble', LayoutDashboard, OverviewTab],
   ['comptes', 'Comptes', Users, UsersTab],
   ['sauvegardes', 'Sauvegardes', Archive, BackupsTab],
+  ['donnees', 'Données', Eraser, DataTab],
   ['base', 'Base de données', Database, DatabaseTab],
   ['fichiers', 'Fichiers', HardDrive, FilesTab],
-  ['serveur', 'Serveur et journal', Server, ServerTab],
+  ['serveur', 'Serveur', Server, ServerTab],
 ];
 
 /** Page Maintenance : tout ce qu'il faut pour faire tourner le cahier, réservé aux administrateurs. */

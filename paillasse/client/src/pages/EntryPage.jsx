@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, ArrowLeft, CornerDownRight, FilePlus2, LayoutTemplate, Lock, RotateCcw } from 'lucide-react';
+import { Archive, ArrowLeft, CornerDownRight, FilePlus2, LayoutTemplate, Lock, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import { formatDateTime, formatShortDate, shortHash } from '../lib/format.js';
 import NoteEditor, { ReadOnlyDoc } from '../components/NoteEditor.jsx';
 import Modal from '../components/Modal.jsx';
+import PurgeDialog from '../components/admin/PurgeDialog.jsx';
 import { StatusBadge } from '../components/EntryList.jsx';
 import { FilesPanel, IntegrityPanel, PrintLink, VersionsPanel } from '../components/EntryPanels.jsx';
 
@@ -19,7 +20,8 @@ const SAVE_LABELS = {
 };
 
 export default function EntryPage({ id }) {
-  const { projects, notify, reloadProjects } = useApp();
+  const { projects, notify, reloadProjects, user } = useApp();
+  const [purging, setPurging] = useState(false);
   const navigate = useNavigate();
 
   const [entry, setEntry] = useState(null);
@@ -314,8 +316,23 @@ export default function EntryPage({ id }) {
               <FilePlus2 size={15} /> Ajouter un addendum
             </button>
           )}
+          {user?.is_admin && (
+            <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setPurging(true)} title="Supprimer définitivement (administrateur)">
+              <Trash2 size={15} />
+              <span className="sr-only">Supprimer définitivement</span>
+            </button>
+          )}
         </div>
       </div>
+      {purging && (
+        <PurgeDialog
+          kind="entries"
+          ids={[id]}
+          title="Supprimer définitivement cette entrée"
+          onClose={() => setPurging(false)}
+          onDone={() => { reloadProjects(); setTimeout(() => navigate(`/projects/${entry.project_id}`), 1200); }}
+        />
+      )}
 
       <div className="entry-layout">
         <article className={`sheet${locked ? ' sheet-locked' : ''}`}>
