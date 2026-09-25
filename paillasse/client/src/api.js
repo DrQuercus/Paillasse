@@ -26,6 +26,11 @@ async function request(method, url, body, headers = {}) {
     if (res.status === 401 && !url.startsWith('/auth/') && !url.startsWith('/shared/')) {
       window.dispatchEvent(new Event('paillasse:unauthorized'));
     }
+    // Mode maintenance (seuls les administrateurs travaillent) ; mot de passe provisoire à changer
+    if (res.status === 503 && data?.maintenance && url !== '/auth/login') {
+      window.dispatchEvent(new CustomEvent('paillasse:maintenance', { detail: data.error }));
+    }
+    if (res.status === 403 && data?.mustChangePassword) window.dispatchEvent(new Event('paillasse:must-change-password'));
     throw new ApiError(res.status, data);
   }
   return data;

@@ -1,13 +1,16 @@
-// Crée un compte ou réinitialise son mot de passe.
-// Usage : npm run create-user -- <identifiant> ["Nom affiché"]
+// Crée un compte ou réinitialise son mot de passe (en secours : sans passer par la page Maintenance).
+// Usage : npm run create-user -- <identifiant> ["Nom affiché"] [--admin]
+// Un compte réinitialisé ici est aussi réactivé ; --admin le rend administrateur.
 import readline from 'node:readline';
 import { hashPassword } from '../src/auth.js';
 import { pool } from '../src/db.js';
 import { migrate } from '../src/migrate.js';
 
-const [username, displayName] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const admin = args.includes('--admin');
+const [username, displayName] = args.filter((a) => a !== '--admin');
 if (!username) {
-  console.error('Usage : npm run create-user -- <identifiant> ["Nom affiché"]');
+  console.error('Usage : npm run create-user -- <identifiant> ["Nom affiché"] [--admin]');
   process.exit(1);
 }
 
@@ -32,14 +35,19 @@ try {
   const confirm = process.env.NEW_PASSWORD || (await askHidden('Confirmation : '));
   if (password !== confirm) throw new Error('Les deux saisies ne correspondent pas.');
   const { rows } = await pool.query(
-    `INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3)
+    `INSERT INTO users (username, display_name, password_hash, is_admin) VALUES ($1, $2, $3, $5)
      ON CONFLICT (username) DO UPDATE
        SET password_hash = EXCLUDED.password_hash,
-           display_name = COALESCE($4, users.display_name)
-     RETURNING (xmax = 0) AS created`,
-    [username, displayName || username, hashPassword(password), displayName || null],
+           display_name = COALESCE($4, users.display_name),
+           is_admin = users.is_admin OR $5,
+           disabled_at = NULL,
+           must_change_password = false,
+           sessions_valid_after = now()
+     RETURNING (xmax = 0) AS created, is_admin`,
+    [username, displayName || username, hashPassword(password), displayName || null, admin],
   );
-  console.log(rows[0].created ? `Compte « ${username} » créé.` : `Mot de passe de « ${username} » mis à jour.`);
+  const role = rows[0].is_admin ? ' (administrateur)' : '';
+  console.log(rows[0].created ? `Compte « ${username} » créé${role}.` : `Mot de passe de « ${username} » mis à jour, compte actif${role}.`);
 } catch (err) {
   console.error(err.message);
   process.exitCode = 1;

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
-export default function Modal({ title, onClose, children, footer, wide = false }) {
+export default function Modal({ title, onClose, children, footer, wide = false, closable = true }) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -24,9 +24,11 @@ export default function Modal({ title, onClose, children, footer, wide = false }
       <div className={`modal${wide ? ' modal-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <header className="modal-head">
           <h2>{title}</h2>
-          <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Fermer">
-            <X size={18} />
-          </button>
+          {closable && (
+            <button type="button" className="icon-btn modal-close" onClick={onClose} aria-label="Fermer">
+              <X size={18} />
+            </button>
+          )}
         </header>
         <div className="modal-body">{children}</div>
         {footer && <footer className="modal-foot">{footer}</footer>}

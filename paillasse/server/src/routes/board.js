@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { query, tx } from '../db.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { blobPath, storeBlob, tmpDir } from '../lib/storage.js';
-import { SESSION_COOKIE, hashPassword, readSessionToken, verifyPassword } from '../auth.js';
+import { hashPassword, sessionUser, verifyPassword } from '../auth.js';
 
 const upload = multer({ dest: tmpDir, limits: { fileSize: config.maxUploadMb * 1024 * 1024 } });
 const COLORS = ['yellow', 'pink', 'blue', 'green', 'orange', 'white'];
@@ -296,11 +296,8 @@ const guestSignature = (token, version, expires) =>
 
 async function sharedAccess(req, p) {
   // Le propriétaire connecté n'a pas besoin du mot de passe
-  const userId = readSessionToken(req.cookies?.[SESSION_COOKIE]);
-  if (userId) {
-    const { rows } = await query('SELECT id, display_name FROM users WHERE id = $1', [userId]);
-    if (rows[0]) return { userId: rows[0].id, name: rows[0].display_name };
-  }
+  const user = await sessionUser(req);
+  if (user) return { userId: user.id, name: user.display_name };
   const token = req.params.token;
   const [expires, signature] = String(req.cookies?.[guestCookieName(token)] ?? '').split('.');
   if (!expires || !signature || Date.now() > Number(expires)) return null;

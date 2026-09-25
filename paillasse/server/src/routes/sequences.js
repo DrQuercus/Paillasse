@@ -265,8 +265,9 @@ async function loadVersion(id, n) {
 
 router.get('/:id/versions/:n', async (req, res) => res.json(await loadVersion(req.params.id, req.params.n)));
 
-router.get('/:id/verify', async (req, res) => {
-  const s = await loadSequence(req.params.id);
+/** Recalcule la chaîne d'empreintes d'une séquence et relit ses fichiers d'origine. */
+export async function verifySequence(id) {
+  const s = await loadSequence(id);
   const { rows: versions } = await query('SELECT * FROM sequence_versions WHERE sequence_id = $1 ORDER BY version_number', [s.id]);
   const issues = [];
   let prev = null;
@@ -286,8 +287,10 @@ router.get('/:id/verify', async (req, res) => {
     if (!fs.existsSync(p)) issues.push(`Fichier d'origine « ${f.filename} » absent du stockage.`);
     else if ((await sha256File(p)) !== row.sha256) issues.push(`Fichier d'origine « ${f.filename} » modifié sur le disque.`);
   }
-  res.json({ ok: !issues.length, version_count: versions.length, last_hash: prev?.hash ?? null, issues, checked_at: new Date().toISOString() });
-});
+  return { ok: !issues.length, version_count: versions.length, last_hash: prev?.hash ?? null, issues, checked_at: new Date().toISOString() };
+}
+
+router.get('/:id/verify', async (req, res) => res.json(await verifySequence(req.params.id)));
 
 // --- Export ------------------------------------------------------------------------
 

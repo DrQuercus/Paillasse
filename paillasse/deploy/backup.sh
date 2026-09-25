@@ -18,7 +18,11 @@ source "$APP_DIR/server/.env"
 set +a
 DATA_DIR_ABS="$(cd "$APP_DIR/server" && realpath "${DATA_DIR:-../data}")"
 
-STAMP="$(date +%Y-%m-%d_%H%M)"
+STAMP="$(date +%Y-%m-%d_%H%M%S)"
+# SSH sans question (clé obligatoire) ; la clé créée par la page Maintenance est utilisée si elle existe
+SSH_KEY="$DATA_DIR_ABS/ssh/id_ed25519"
+SSH_CMD="ssh -o BatchMode=yes -o ConnectTimeout=15"
+[[ -f "$SSH_KEY" ]] && SSH_CMD="$SSH_CMD -i $SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$DATA_DIR_ABS/ssh/known_hosts"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -27,12 +31,12 @@ pg_dump --format=custom --no-owner --file "$WORK/paillasse_$STAMP.dump" "$DATABA
 
 echo "[$(date -Is)] Copie vers $DEST…"
 if [[ "$DEST" == *:* ]]; then
-  ssh "${DEST%%:*}" "mkdir -p '${DEST#*:}/db' '${DEST#*:}/blobs'"
+  $SSH_CMD "${DEST%%:*}" "mkdir -p '${DEST#*:}/db' '${DEST#*:}/blobs'"
 else
   mkdir -p "$DEST/db" "$DEST/blobs"
 fi
-rsync -a "$WORK/paillasse_$STAMP.dump" "$DEST/db/"
-rsync -a "$DATA_DIR_ABS/blobs/" "$DEST/blobs/"
+rsync -a -e "$SSH_CMD" "$WORK/paillasse_$STAMP.dump" "$DEST/db/"
+rsync -a -e "$SSH_CMD" "$DATA_DIR_ABS/blobs/" "$DEST/blobs/"
 
 if [[ "$DEST" != *:* ]]; then
   # garde les KEEP_DUMPS dumps les plus récents

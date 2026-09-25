@@ -4,7 +4,10 @@ import express from 'express';
 import { config } from './config.js';
 import { pool } from './db.js';
 import { migrate } from './migrate.js';
-import { ensureFirstUser, parseCookies, requireAuth } from './auth.js';
+import { ensureFirstUser, parseCookies, requireAdmin, requireAuth, requirePasswordChosen } from './auth.js';
+import { installServerLog } from './lib/serverLog.js';
+import { loadSettings } from './lib/settings.js';
+import { startBackupScheduler } from './lib/backup.js';
 import { ensureDataDirs } from './lib/storage.js';
 import { escapeHtml } from './lib/render.js';
 import { installTemplateLibrary } from './lib/templates.js';
@@ -21,7 +24,10 @@ import reagentRoutes from './routes/reagents.js';
 import ladderRoutes from './routes/ladders.js';
 import datasetRoutes from './routes/datasets.js';
 import inventoryRoutes from './routes/inventory.js';
+import adminRoutes from './routes/admin.js';
 import { ownerBoard, sharedBoard } from './routes/board.js';
+
+installServerLog();
 
 if (config.sessionSecret.length < 32) {
   console.error('SESSION_SECRET manquant ou trop court (32 caractères minimum). Voir server/.env.example');
@@ -41,6 +47,8 @@ app.use('/api/shared/:token', sharedBoard);
 
 const api = express.Router();
 api.use(requireAuth);
+api.use(requirePasswordChosen);
+api.use('/admin', requireAdmin, adminRoutes);
 api.use('/projects/:projectId/board', ownerBoard);
 api.use('/projects', projectRoutes);
 api.use('/entries', entryRoutes);
@@ -97,6 +105,8 @@ ensureDataDirs();
 await migrate();
 await installTemplateLibrary(pool);
 await ensureFirstUser();
+await loadSettings();
+await startBackupScheduler();
 
 const server = app.listen(config.port, config.host, () => {
   console.log(`Paillasse en écoute sur http://${config.host}:${config.port}`);

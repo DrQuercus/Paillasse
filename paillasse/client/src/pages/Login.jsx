@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onMaintenance }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -14,6 +14,7 @@ export default function Login({ onLogin }) {
     try {
       onLogin(await api.post('/auth/login', { username, password }));
     } catch (err) {
+      if (err.body?.maintenance && onMaintenance) onMaintenance(err.message);
       setError(err.message);
       setBusy(false);
     }

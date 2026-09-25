@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Calculator, ChartColumn, Columns4, Dna, Download, FilePlus2, LayoutTemplate, LogOut, Menu, Plus, Search, Snowflake, X } from 'lucide-react';
+import {
+  BookOpen, Calculator, ChartColumn, Columns4, Dna, Download, FilePlus2, KeyRound, LayoutTemplate, LogOut, Menu, Plus, Search, Snowflake, Wrench, X,
+} from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
+import PasswordDialog from './PasswordDialog.jsx';
 import ProjectDialog from './ProjectDialog.jsx';
 
 export default function Sidebar() {
@@ -10,6 +13,7 @@ export default function Sidebar() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [projectDialog, setProjectDialog] = useState(false);
+  const [passwordDialog, setPasswordDialog] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -74,6 +78,7 @@ export default function Sidebar() {
           <NavLink to="/stats" className="nav-link"><ChartColumn size={16} /> Statistiques</NavLink>
           <NavLink to="/calc" className="nav-link"><Calculator size={16} /> Calculs</NavLink>
           <NavLink to="/templates" className="nav-link"><LayoutTemplate size={16} /> Modèles</NavLink>
+          {user.is_admin && <NavLink to="/maintenance" className="nav-link nav-admin"><Wrench size={16} /> Maintenance</NavLink>}
         </nav>
 
         <div className="sidebar-section">
@@ -103,6 +108,9 @@ export default function Sidebar() {
           </a>
           <div className="sidebar-user">
             <span>{user.display_name}</span>
+            <button type="button" className="icon-btn" onClick={() => setPasswordDialog(true)} title="Changer mon mot de passe" aria-label="Changer mon mot de passe">
+              <KeyRound size={16} />
+            </button>
             <button type="button" className="icon-btn" onClick={logout} title="Se déconnecter" aria-label="Se déconnecter">
               <LogOut size={16} />
             </button>
@@ -110,6 +118,12 @@ export default function Sidebar() {
         </div>
       </aside>
       {open && <div className="sidebar-scrim" onClick={() => setOpen(false)} aria-hidden="true" />}
+      {passwordDialog && (
+        <PasswordDialog
+          onClose={() => setPasswordDialog(false)}
+          onDone={(u) => { setUser(u); setPasswordDialog(false); notify('Mot de passe changé. Vos autres sessions sont fermées.', 'success'); }}
+        />
+      )}
       {projectDialog && (
         <ProjectDialog
           onClose={() => setProjectDialog(false)}

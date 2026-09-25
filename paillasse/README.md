@@ -201,6 +201,36 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   plus jamais écrasé, « Revenir à la version d'origine » le rétablit), se dupliquent, se retirent et se remettent ;
   on en crée aussi à la main ou à partir d'une entrée, avec ses propres emplacements (bouton « Emplacement à
   remplir » de la barre d'outils du modèle).
+- **Maintenance** (comptes administrateurs, menu « Maintenance ») : un administrateur arrive directement sur
+  cette page en se connectant. Tout ce qu'il faut pour faire tourner le cahier, sans ligne de commande :
+  - *Vue d'ensemble* : état des sauvegardes, de la base, du disque, des comptes et du serveur, avec les alertes
+    (aucune sauvegarde, dernière réussie il y a plus de 36 h, disque presque plein, un seul administrateur…) ;
+    **mode maintenance** : les autres comptes voient une page d'attente avec votre message, rien ne s'écrit.
+  - *Comptes* : créer un compte (mot de passe provisoire affiché une seule fois, la personne choisit le sien à la
+    première connexion), réinitialiser un mot de passe, déconnecter de tous ses appareils, rendre administrateur,
+    désactiver ou réactiver. Un compte ne se supprime jamais : ses entrées restent signées de son nom ; il reste
+    toujours au moins un administrateur actif. Chacun peut changer son mot de passe (icône clé, en bas à gauche).
+  - *Sauvegardes* : destinations vers un dossier du serveur (NAS monté, disque externe) ou une autre machine par
+    SSH (clé de Paillasse créée et affichée dans la page, à ajouter dans `authorized_keys`), chaque jour à l'heure
+    choisie ou à la demande, nombre de dumps gardés ; « Tester » vérifie l'écriture et la place libre (et prévient
+    si la destination est sur le même disque que le cahier) ; historique avec journal de chaque sauvegarde.
+    Chaque sauvegarde : `pg_dump` relu aussitôt avec `pg_restore`, puis les fichiers joints nouveaux (jamais
+    d'effacement côté destination) ; même organisation que `deploy/backup.sh` (`db/`, `blobs/`).
+    **Restauration** depuis la liste des sauvegardes d'une destination : mode maintenance obligatoire, « RESTAURER »
+    tapé en toutes lettres, copie de sécurité de la base actuelle d'abord, remplacement en une seule transaction
+    (en cas d'erreur rien ne change), fichiers absents recopiés, schéma remis à niveau ; les destinations,
+    l'historique des sauvegardes et le journal d'administration sont conservés. « Revenir à cette copie » annule
+    une restauration.
+  - *Base de données* : version, taille, tables, migrations ; **vérification d'intégrité de tout le cahier**
+    (empreintes et chaînes de chaque version figée, entrées et séquences, fichiers relus) ; optimisation
+    (`VACUUM ANALYZE`) ; téléchargement d'une copie `.dump` ; **console SQL en lecture seule** (une instruction,
+    transaction `READ ONLY`, 10 s, 500 lignes) avec des requêtes toutes prêtes.
+  - *Fichiers* : place sur le disque, fichiers connus de la base et présents sur le disque, vérification rapide
+    (manquants, orphelins) ou relecture complète (empreinte SHA-256 recalculée : un disque qui s'abîme se voit),
+    fichiers temporaires d'envois interrompus, plus gros fichiers.
+  - *Serveur et journal* : version, Node.js, mémoire, configuration (`.env`, mot de passe masqué), outils du
+    système présents ou à installer, **journal d'administration** (qui a fait quoi, en ajout seul) et journal du
+    serveur depuis le démarrage (erreurs en rouge).
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
 - **Export complet** en un clic : zip avec `data.json`, chaque entrée en HTML autonome et tous les fichiers.
@@ -238,8 +268,8 @@ cp server/.env.example server/.env
 openssl rand -hex 32          # à coller dans SESSION_SECRET
 nano server/.env              # DATABASE_URL, SESSION_SECRET, DATA_DIR…
 
-# 4. Compte utilisateur (applique aussi les migrations)
-npm --prefix server run create-user -- louis "Louis"
+# 4. Premier compte, administrateur (applique aussi les migrations) ; les autres se créent dans la page Maintenance
+npm --prefix server run create-user -- louis "Louis" --admin
 
 # 5. Service systemd
 sudo chown -R paillasse:paillasse /opt/paillasse
@@ -260,6 +290,12 @@ Les nouvelles migrations de schéma s'appliquent toutes seules au redémarrage.
 À faire dès le premier jour, vers une machine **autre que le serveur** (NAS, disque réseau, autre hôte).
 Il faut sauvegarder la base **et** le dossier `DATA_DIR` : l'un sans l'autre ne suffit pas.
 
+Le plus simple : page **Maintenance › Sauvegardes** (destination, test, horaire, historique, restauration). Il faut
+`pg_dump`, `pg_restore` et `psql` sur le serveur (`sudo apt install postgresql-client`), plus `rsync` et `ssh`
+pour une destination SSH. Les horaires sont ceux du serveur ; une sauvegarde manquée (serveur éteint) est faite
+au redémarrage. Le script ci-dessous reste utile hors de l'application (même organisation, même clé SSH) ;
+n'activez pas à la fois le timer systemd et une destination planifiée vers le même endroit.
+
 ```bash
 # test manuel
 BACKUP_DEST=/mnt/nas/paillasse ./deploy/backup.sh
@@ -278,7 +314,12 @@ pg_restore --no-owner -d "postgres://paillasse:…@localhost/paillasse" db/paill
 rsync -a blobs/ /opt/paillasse/data/blobs/
 ```
 
-Après une restauration, le bouton « Vérifier l'intégrité » d'une entrée confirme que base et fichiers concordent.
+Après une restauration, « Vérifier l'intégrité de tout le cahier » (Maintenance › Base de données) confirme que
+base et fichiers concordent.
+
+Plus aucun administrateur ne peut se connecter (mot de passe oublié, compte désactivé) ? Sur le serveur :
+`npm --prefix server run create-user -- secours "Compte de secours" --admin` crée ou réactive un compte
+administrateur (et remet son mot de passe).
 L'export zip (barre latérale) est un complément lisible sans l'application, pas un remplacement des sauvegardes.
 
 ## Développement
@@ -391,6 +432,8 @@ vérifiées par le serveur à chaque enregistrement : l'éditeur peut être remp
 server/
   migrations/001_initial.sql   schéma, triggers d'ajout seul et de verrouillage
   migrations/011_cryoem.sql    cryo-EM : canister, puck, boîte à grilles (format, case, capacité), conditions des grilles
+  migrations/012_admin.sql     administrateurs, comptes désactivés, sessions révocables, journal d'administration,
+                               réglages (mode maintenance), destinations et historique des sauvegardes
   src/index.js                 point d'entrée Express, sert aussi client/dist
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
@@ -400,6 +443,9 @@ server/
   src/lib/stat.js              encart de graphique statistique : vérification, rendu imprimable, texte de recherche
   src/lib/templates.js         modèles de base : installation au démarrage, mise à jour s'ils sont intacts
   src/lib/inventory.js         stockage : qui contient quoi, positions A1, chemins, validation (copié côté client)
+  src/lib/backup.js            sauvegardes (dossier ou SSH), planification, restauration atomique, clé SSH
+  src/lib/jobs.js              tâches longues suivies par la page Maintenance ; settings.js, serverLog.js
+  src/routes/admin.js          page Maintenance : comptes, sauvegardes, base, fichiers, serveur (administrateurs)
   src/lib/template-library.json  modèles de base (généré par npm --prefix client run templates)
   src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
                                jeux de données statistiques, stockage (inventory)
@@ -424,6 +470,7 @@ client/
                                cryo.jsx : dewar, canister, puck, boîte à grilles, dessin des grilles, criblage
   src/lib/gridbox.js           plan des boîtes à grilles (logements, cran, vis, numéros), testé
   src/pages/StoragePage.jsx    page Stockage
+  src/pages/MaintenancePage.jsx  page Maintenance ; src/components/admin/ : un onglet par fichier
 deploy/                        service systemd, sauvegarde et son timer
 ```
 
@@ -439,7 +486,10 @@ deploy/                        service systemd, sauvegarde et son timer
 - Registre limité aux séquences : pas encore de fiches de souches ou de protéines.
 - Cryo-EM : le criblage et les sessions se notent à la main (pas de lien avec EPU, SerialEM ou cryoSPARC).
 - Pas de liens entre entrées autres que les addenda.
-- Pas de gestion des droits : tout compte connecté voit tout (les invités d'un tableau partagé, eux, ne voient que ce tableau).
+- Deux rôles seulement : administrateur (page Maintenance) ou non ; hors de là, tout compte connecté voit tout
+  (les invités d'un tableau partagé, eux, ne voient que ce tableau).
+- La restauration depuis la page remplace toute la base : pas de restauration d'une seule entrée (le journal des
+  versions de chaque entrée sert à ça).
 - Tableau partagé : si deux personnes modifient le même post-it au même moment, la dernière modification l'emporte.
 - Les fichiers ne sont pas prévisualisés hors images (les PDF s'ouvrent dans le navigateur).
 - Éditeur de séquences : interface d'OVE en anglais ; pas encore de clonage in silico ni d'alignement
