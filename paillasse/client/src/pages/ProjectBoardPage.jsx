@@ -23,9 +23,15 @@ export default function ProjectBoardPage() {
       <header className="board-head" style={{ '--project': project?.color ?? 'var(--ink-3)' }}>
         <h1>{project?.name ?? '…'}</h1>
         <ProjectTabs projectId={id} shared={project?.board_shared} />
-        <button type="button" className={`btn ${project?.board_shared ? 'btn-shared' : 'btn-ghost'} board-share`} onClick={() => setSharing(true)}>
-          <Share2 size={15} /> {project?.board_shared ? 'Partagé par lien' : 'Partager'}
-        </button>
+        {/* Le lien public (mot de passe commun) : seul le propriétaire du projet le règle */}
+        {project?.role === 'owner' && (
+          <button type="button" className={`btn ${project.board_shared ? 'btn-shared' : 'btn-ghost'} board-share`} onClick={() => setSharing(true)}>
+            <Share2 size={15} /> {project.board_shared ? 'Partagé par lien' : 'Partager par lien'}
+          </button>
+        )}
+        {project && project.role !== 'owner' && project.board_shared && (
+          <span className="access-chip is-shared board-share" title="Le propriétaire a ouvert ce tableau par un lien protégé par mot de passe"><Share2 size={13} aria-hidden="true" /> Partagé par lien</span>
+        )}
       </header>
       <Board key={id} client={client} notify={notify} />
       {sharing && (

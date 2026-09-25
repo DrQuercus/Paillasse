@@ -62,6 +62,7 @@ export default function App() {
   const navigate = useNavigate();
   const landed = useRef(false);
   const [projects, setProjects] = useState([]);
+  const [invitations, setInvitations] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [newEntry, setNewEntry] = useState(null);
   const location = useLocation();
@@ -75,8 +76,12 @@ export default function App() {
     setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), kind === 'error' ? 8000 : 4000);
   }, []);
 
+  // Projets visibles (les miens, ceux où j'ai accepté l'invitation) et invitations en attente
   const reloadProjects = useCallback(
-    () => api.get('/projects').then(setProjects).catch((err) => notify(err.message, 'error')),
+    () => Promise.all([
+      api.get('/projects').then(setProjects),
+      api.get('/invitations').then(setInvitations),
+    ]).catch((err) => notify(err.message, 'error')),
     [notify],
   );
 
@@ -117,17 +122,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user && !user.must_change_password) reloadProjects();
+    if (!user || user.must_change_password) return undefined;
+    reloadProjects();
+    // Une invitation peut arriver à tout moment : on regarde de temps en temps
+    const timer = setInterval(() => api.get('/invitations').then(setInvitations).catch(() => {}), 120_000);
+    return () => clearInterval(timer);
   }, [user, reloadProjects]);
 
   const context = useMemo(() => ({
     user,
     setUser,
     projects,
+    invitations,
     reloadProjects,
     notify,
     openNewEntry: (projectId, templateId) => setNewEntry({ projectId, templateId }),
-  }), [user, projects, reloadProjects, notify]);
+  }), [user, projects, invitations, reloadProjects, notify]);
 
   // Tableau partagé par lien : accessible sans compte
   if (sharedToken) return <SharedBoardPage token={sharedToken} />;

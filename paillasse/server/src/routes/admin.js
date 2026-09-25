@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Router } from 'express';
 import { config } from '../config.js';
-import { pool, query } from '../db.js';
+import { pool, query, tx } from '../db.js';
 import { hashPassword, temporaryPassword } from '../auth.js';
 // sessions_valid_after : toujours l'horloge de ce serveur (voir sessionUser)
 import { HttpError, notFound } from '../lib/errors.js';
@@ -24,6 +24,7 @@ import {
   checkDest, dumpDatabase, ensureSshKey, stampOf, findTool, lastDue, listDumps, nextDue, parseDest, pgEnv, publicKey, safetyDir,
   startBackup, startRestore, testTarget, toolStatus, walkBlobs,
 } from '../lib/backup.js';
+import { members } from './projects.js';
 import { verifySequence } from './sequences.js';
 
 const router = Router();
@@ -167,6 +168,7 @@ router.post('/users/:id/delete', async (req, res) => {
     const r = await deleteUser(user.id, { data, anonymize, actorId: req.user.id });
     const removed = Object.entries(r.removed).filter(([, n]) => n).map(([k, n]) => `${n} ${REMOVED_LABELS[k] ?? k}`);
     j.log(removed.length ? `Supprimé : ${removed.join(', ')}.` : 'Aucune donnée supprimée.');
+    if (r.handed_over) j.log(`${r.handed_over} projet(s) confié(s) à leur plus ancien membre, ou à vous s’ils n’en avaient pas.`);
     j.log(r.full ? 'Le compte a entièrement disparu.' : `Le compte est supprimé ; ${anonymize ? '« Compte supprimé »' : `le nom « ${user.display_name} »`} reste sur ses entrées et versions figées.`);
     await logAdmin(req.user, 'Compte supprimé', `${user.username} (${user.display_name}) : ${data === 'delete' ? 'avec ses données' : 'données gardées'}${anonymize ? ', anonymisé' : ''}${removed.length ? ` ; ${removed.join(', ')}` : ''}`);
     return { ...r, removed_text: removed };
@@ -177,7 +179,7 @@ router.post('/users/:id/delete', async (req, res) => {
 router.post('/users/:id/forget', async (req, res) => {
   const user = await loadUser(req.params.id);
   if (!user.deleted_at) throw bad('Supprimez d’abord le compte.');
-  await forgetDeletedUser(user.id);
+  await forgetDeletedUser(user.id, req.user.id);
   await logAdmin(req.user, 'Compte effacé', `${user.display_name} : plus aucune trace dans la base`);
   res.json({ ok: true });
 });
@@ -723,7 +725,10 @@ router.get('/data/entries', async (req, res) => {
 
 router.get('/data/projects', async (_req, res) => {
   const { rows } = await query(`
-    SELECT p.id, p.name, p.color, p.archived, p.created_at, u.display_name AS owner,
+    SELECT p.id, p.name, p.color, p.archived, p.created_at, u.display_name AS owner, p.created_by AS owner_id,
+           coalesce((SELECT array_agg(mu.display_name ORDER BY mu.display_name) FROM project_members m JOIN users mu ON mu.id = m.user_id
+                     WHERE m.project_id = p.id AND m.status = 'accepted' AND mu.deleted_at IS NULL), '{}') AS members,
+           (SELECT count(*)::int FROM project_members m WHERE m.project_id = p.id AND m.status = 'pending') AS pending,
            (SELECT count(*)::int FROM entries e WHERE e.project_id = p.id) AS entries,
            (SELECT count(*)::int FROM entries e WHERE e.project_id = p.id AND e.status = 'locked') AS locked,
            (SELECT count(*)::int FROM sequences s WHERE s.project_id = p.id) AS sequences,
@@ -731,6 +736,54 @@ router.get('/data/projects', async (_req, res) => {
            (SELECT count(*)::int FROM board_notes n WHERE n.project_id = p.id AND n.deleted_at IS NULL) AS notes
     FROM projects p JOIN users u ON u.id = p.created_by ORDER BY p.archived, p.name`);
   res.json(rows);
+});
+
+// Partage d'un projet, en cas de besoin (propriétaire parti, membre à retirer). On ne donne un projet qu'à
+// un membre qui a déjà accepté d'y être : personne ne reçoit un projet sans l'avoir voulu.
+router.get('/data/projects/:id/members', async (req, res) => {
+  const { rows } = await query('SELECT id FROM projects WHERE id = $1', [req.params.id]);
+  if (!rows[0]) throw notFound('Projet');
+  res.json(await members(req.params.id));
+});
+
+router.post('/data/projects/:id/owner', async (req, res) => {
+  const userId = String(req.body?.user_id ?? '');
+  const result = await tx(async (db) => {
+    const { rows: [p] } = await db.query(
+      'SELECT p.id, p.name, p.created_by, u.display_name AS owner FROM projects p JOIN users u ON u.id = p.created_by WHERE p.id = $1 FOR UPDATE OF p',
+      [req.params.id],
+    );
+    if (!p) throw notFound('Projet');
+    const { rows: [m] } = await db.query(
+      `SELECT u.display_name FROM project_members m JOIN users u ON u.id = m.user_id
+       WHERE m.project_id = $1 AND m.user_id = $2 AND m.status = 'accepted' AND u.deleted_at IS NULL`,
+      [p.id, /^[0-9a-f-]{36}$/i.test(userId) ? userId : null],
+    );
+    if (!m) throw bad('Choisissez un membre qui a accepté l’invitation.');
+    await db.query('DELETE FROM project_members WHERE project_id = $1 AND user_id = $2', [p.id, userId]);
+    await db.query('UPDATE projects SET created_by = $2, updated_at = now() WHERE id = $1', [p.id, userId]);
+    // L'ancien propriétaire reste membre (le nouveau pourra le retirer)
+    await db.query(
+      `INSERT INTO project_members (project_id, user_id, status, invited_by, responded_at) VALUES ($1, $2, 'accepted', $3, now())
+       ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'accepted', responded_at = now()`,
+      [p.id, p.created_by, userId],
+    );
+    return { name: p.name, from: p.owner, to: m.display_name };
+  });
+  await logAdmin(req.user, 'Projet confié à un autre membre', `« ${result.name} » : ${result.from} → ${result.to}`);
+  res.json(await members(req.params.id));
+});
+
+router.delete('/data/projects/:id/members/:userId', async (req, res) => {
+  const { rows: [r] } = await query(
+    `DELETE FROM project_members m USING projects p, users u
+     WHERE m.project_id = $1 AND m.user_id = $2 AND p.id = m.project_id AND u.id = m.user_id
+     RETURNING p.name, u.display_name, m.status`,
+    [req.params.id, req.params.userId],
+  );
+  if (!r) throw notFound('Membre');
+  await logAdmin(req.user, r.status === 'pending' ? 'Invitation annulée' : 'Membre retiré d’un projet', `« ${r.name} » : ${r.display_name}`);
+  res.json(await members(req.params.id));
 });
 
 router.get('/data/sequences', async (_req, res) => {

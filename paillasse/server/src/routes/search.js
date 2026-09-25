@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { query } from '../db.js';
+import { visibleProjects } from '../lib/access.js';
 
 const router = Router();
 
@@ -19,9 +20,10 @@ router.get('/', async (req, res) => {
               'StartSel=⟦, StopSel=⟧, MaxFragments=2, MaxWords=28, MinWords=10, FragmentDelimiter=" … "') AS snippet
      FROM entries e JOIN projects p ON p.id = e.project_id, q
      WHERE NOT e.archived AND (e.search @@ q.tsq OR e.title ILIKE $2 OR e.plain_text ILIKE $2)
+       AND e.project_id IN ${visibleProjects('$3')}
      ORDER BY rank DESC, e.entry_date DESC
      LIMIT 50`,
-    [tsquery, like],
+    [tsquery, like, req.user.id],
   );
   res.json(rows);
 });

@@ -139,6 +139,7 @@ async function deleteProjects(c, list) {
   const datasets = await c.query('DELETE FROM datasets WHERE project_id = ANY($1)', [list]);
   await c.query('UPDATE sequences SET project_id = NULL WHERE project_id = ANY($1)', [list]);
   await c.query('UPDATE samples SET project_id = NULL WHERE project_id = ANY($1)', [list]);
+  await c.query('DELETE FROM project_members WHERE project_id = ANY($1)', [list]);
   const projects = await c.query('DELETE FROM projects WHERE id = ANY($1)', [list]);
   return { projects: projects.rowCount, ...entries, notes: notes.rowCount, datasets: datasets.rowCount };
 }
@@ -267,7 +268,7 @@ export async function purge(kind, list) {
 // Colonnes qui nomment un compte sans être scellées : remises à NULL quand le compte disparaît vraiment
 const NULLABLE_REFS = [
   ['admin_log', 'user_id'], ['app_settings', 'updated_by'], ['backup_runs', 'started_by'], ['backup_targets', 'created_by'],
-  ['board_images', 'uploaded_by'], ['board_notes', 'created_by'], ['datasets', 'created_by'], ['datasets', 'updated_by'],
+  ['board_images', 'uploaded_by'], ['board_notes', 'created_by'], ['project_members', 'invited_by'], ['datasets', 'created_by'], ['datasets', 'updated_by'],
   ['entries', 'locked_by'], ['ladders', 'created_by'], ['ladders', 'updated_by'], ['reagents', 'created_by'], ['reagents', 'updated_by'],
   ['sample_events', 'created_by'], ['samples', 'created_by'], ['samples', 'updated_by'], ['samples', 'owner_id'],
   ['storage_units', 'created_by'], ['storage_units', 'updated_by'], ['templates', 'created_by'], ['templates', 'updated_by'],
@@ -291,9 +292,30 @@ export async function userImpact(userId) {
 }
 
 /**
+ * Les projets d'un compte qui s'en va passent au plus ancien membre actif (il a accepté d'y être), sinon à
+ * l'administrateur qui supprime ; ses propres invitations et participations disparaissent.
+ */
+async function handOverProjects(c, userId, actorId) {
+  const { rows } = await c.query('SELECT id FROM projects WHERE created_by = $1', [userId]);
+  for (const { id } of rows) {
+    const { rows: [m] } = await c.query(
+      `SELECT m.user_id FROM project_members m JOIN users u ON u.id = m.user_id
+       WHERE m.project_id = $1 AND m.user_id <> $2 AND m.status = 'accepted' AND u.deleted_at IS NULL AND u.disabled_at IS NULL
+       ORDER BY m.responded_at NULLS LAST, m.invited_at LIMIT 1`,
+      [id, userId],
+    );
+    const heir = m?.user_id ?? actorId;
+    await c.query('DELETE FROM project_members WHERE project_id = $1 AND user_id = $2', [id, heir]);
+    await c.query('UPDATE projects SET created_by = $2, updated_at = now() WHERE id = $1', [id, heir]);
+  }
+  await c.query('DELETE FROM project_members WHERE user_id = $1', [userId]);
+  return rows.length;
+}
+
+/**
  * Supprime un compte. data : 'keep' (ses entrées restent, signées de son nom ou « Compte supprimé » si
  * anonymize) ou 'delete' (ses entrées, séquences, jeux de données, modèles et post-it partent avec lui ;
- * ses tubes restent au stockage, sans propriétaire ; ses projets partagés passent à actorId).
+ * ses tubes restent au stockage, sans propriétaire). Ses projets non vides passent à un membre ou à actorId.
  * Le compte disparaît entièrement si plus rien de scellé ne le cite ; sinon il ne reste qu'un nom sur
  * les versions figées : identifiant libéré, mot de passe effacé, plus de connexion possible.
  */
@@ -321,7 +343,7 @@ export async function deleteUser(userId, { data = 'keep', anonymize = false, act
         [userId],
       );
       if (projects.length) out.removed.projects = (await deleteProjects(c, projects.map((p) => p.id))).projects;
-      await c.query('UPDATE projects SET created_by = $2 WHERE created_by = $1', [userId, actorId]);
+      out.handed_over = await handOverProjects(c, userId, actorId);
       for (const [table, col] of NULLABLE_REFS) await c.query(`UPDATE ${table} SET ${col} = NULL WHERE ${col} = $1`, [userId]);
       // Plus rien ne le cite ? Le compte disparaît complètement.
       await c.query('SAVEPOINT full_delete');
@@ -335,6 +357,7 @@ export async function deleteUser(userId, { data = 'keep', anonymize = false, act
       }
     }
     // Il reste un nom sur des versions figées : le compte devient une simple signature
+    out.handed_over = await handOverProjects(c, userId, actorId);
     await c.query(
       `UPDATE users SET username = '~supprime-' || id::text, password_hash = '!', is_admin = false, must_change_password = false,
          disabled_at = coalesce(disabled_at, now()), deleted_at = now(), sessions_valid_after = $2,
@@ -352,9 +375,10 @@ export async function anonymizeDeletedUser(userId) {
 }
 
 /** Efface pour de bon un compte supprimé que plus rien de scellé ne cite (plus aucune entrée, séquence, version…). */
-export async function forgetDeletedUser(userId) {
+export async function forgetDeletedUser(userId, actorId) {
   try {
     return await withPurge(async (c) => {
+      await handOverProjects(c, userId, actorId);
       for (const [table, col] of NULLABLE_REFS) await c.query(`UPDATE ${table} SET ${col} = NULL WHERE ${col} = $1`, [userId]);
       return (await c.query('DELETE FROM users WHERE id = $1 AND deleted_at IS NOT NULL', [userId])).rowCount;
     });

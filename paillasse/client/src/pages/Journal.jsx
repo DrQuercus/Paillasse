@@ -3,6 +3,7 @@ import { FilePlus2 } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import EntryList from '../components/EntryList.jsx';
+import { InvitationsPanel } from '../components/Sharing.jsx';
 
 const PAGE = 100;
 
@@ -30,12 +31,14 @@ export default function Journal() {
       <header className="page-head">
         <div>
           <h1>Journal</h1>
-          <p className="page-lead">Toutes les entrées, de la plus récente à la plus ancienne.</p>
+          <p className="page-lead">Les entrées de vos projets, de la plus récente à la plus ancienne.</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => openNewEntry()}>
           <FilePlus2 size={16} /> Nouvelle entrée
         </button>
       </header>
+
+      <InvitationsPanel onAccepted={() => load()} />
 
       {entries === null && <p className="muted">Chargement…</p>}
       {entries?.length === 0 && (

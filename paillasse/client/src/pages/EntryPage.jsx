@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, ArrowLeft, CornerDownRight, FilePlus2, LayoutTemplate, Lock, RotateCcw, Trash2 } from 'lucide-react';
+import { Archive, ArrowLeft, CornerDownRight, Eye, FilePlus2, LayoutTemplate, Lock, RotateCcw, Trash2 } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import { formatDateTime, formatShortDate, shortHash } from '../lib/format.js';
@@ -43,6 +43,9 @@ export default function EntryPage({ id }) {
   // État de l'autosave, hors du cycle de rendu React
   const st = useRef({ dirty: false, saving: null, blocked: false, timer: null, revision: 0, title: '', date: '', content: null, projectId: null });
   const locked = entry?.status === 'locked';
+  // Administrateur qui n'est pas membre du projet : il lit, n'écrit pas
+  const readOnly = entry?.role === 'admin';
+  const frozen = locked || readOnly;
 
   const loadVersions = useCallback(
     () => api.get(`/entries/${id}/versions`).then(setVersions).catch(() => {}),
@@ -58,7 +61,7 @@ export default function EntryPage({ id }) {
         setProjectId(e.project_id);
         Object.assign(st.current, {
           revision: e.revision, title: e.title, date: e.entry_date, content: e.content,
-          projectId: e.project_id, blocked: e.status === 'locked',
+          projectId: e.project_id, blocked: e.status === 'locked' || e.role === 'admin',
         });
         setSaveState(e.status === 'locked' ? 'locked' : 'saved');
       })
@@ -248,7 +251,7 @@ export default function EntryPage({ id }) {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        if (!locked && !busy) createVersion();
+        if (!frozen && !busy) createVersion();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -294,10 +297,11 @@ export default function EntryPage({ id }) {
           {project?.name ?? entry.project_name}
         </Link>
         <StatusBadge status={entry.status} versionCount={entry.version_count} />
-        {!locked && <span className={`save-state save-${saveState}`} aria-live="polite">{SAVE_LABELS[saveState]}</span>}
+        {!frozen && <span className={`save-state save-${saveState}`} aria-live="polite">{SAVE_LABELS[saveState]}</span>}
+        {readOnly && <span className="readonly-badge" title="Vous n’êtes pas membre de ce projet : accès administrateur, en lecture seule"><Eye size={13} aria-hidden="true" /> Lecture seule</span>}
         <div className="head-actions">
           <PrintLink entryId={id} version={locked ? 'last' : null}>Imprimer</PrintLink>
-          {!locked && (
+          {!frozen && (
             <>
               <button type="button" className="btn btn-ghost" onClick={saveAsTemplate} title="Enregistrer comme modèle">
                 <LayoutTemplate size={15} /> Modèle
@@ -311,7 +315,7 @@ export default function EntryPage({ id }) {
               </button>
             </>
           )}
-          {locked && (
+          {locked && !readOnly && (
             <button type="button" className="btn btn-primary" onClick={addendum}>
               <FilePlus2 size={15} /> Ajouter un addendum
             </button>
@@ -354,7 +358,7 @@ export default function EntryPage({ id }) {
             className="sheet-title"
             rows={1}
             value={title}
-            readOnly={locked}
+            readOnly={frozen}
             onChange={(e) => {
               const v = e.target.value.replace(/\n/g, ' ');
               setTitle(v);
@@ -368,7 +372,7 @@ export default function EntryPage({ id }) {
               <input
                 type="date"
                 value={entryDate}
-                disabled={locked}
+                disabled={frozen}
                 onChange={(e) => {
                   if (!e.target.value) return;
                   setEntryDate(e.target.value);
@@ -376,7 +380,7 @@ export default function EntryPage({ id }) {
                 }}
               />
             </label>
-            {!locked && projects.length > 1 && (
+            {!frozen && projects.length > 1 && (
               <label>
                 <span className="sr-only">Projet</span>
                 <select
@@ -397,9 +401,9 @@ export default function EntryPage({ id }) {
           <NoteEditor
             key={docKey}
             content={entry.content}
-            editable={!locked}
+            editable={!frozen}
             onChange={(json) => markDirty({ content: json })}
-            onUpload={locked ? undefined : upload}
+            onUpload={frozen ? undefined : upload}
             entryId={id}
             onReady={(ed) => { editorRef.current = ed; }}
           />
@@ -436,9 +440,9 @@ export default function EntryPage({ id }) {
             ))}
           </div>
           {panel === 'history' && (
-            <VersionsPanel versions={versions} locked={locked} onCreate={createVersion} onOpen={showVersion} busy={busy} />
+            <VersionsPanel versions={versions} locked={frozen} onCreate={createVersion} onOpen={showVersion} busy={busy} />
           )}
-          {panel === 'files' && <FilesPanel attachments={attachments} locked={locked} onUpload={upload} />}
+          {panel === 'files' && <FilesPanel attachments={attachments} locked={frozen} onUpload={upload} />}
           {panel === 'integrity' && (
             <IntegrityPanel entryId={id} lastHash={entry.last_version_hash} versionCount={entry.version_count} />
           )}
@@ -474,7 +478,7 @@ export default function EntryPage({ id }) {
           footer={(
             <>
               <PrintLink entryId={id} version={openVersion.version_number}>Imprimer cette version</PrintLink>
-              {!locked && (
+              {!frozen && (
                 <button type="button" className="btn btn-primary" onClick={() => restore(openVersion)}>
                   <RotateCcw size={15} /> Restaurer dans le brouillon
                 </button>

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { query } from '../db.js';
+import { assertDataset, assertProject, visibleProjects } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { KINDS, cleanDataset } from '../lib/stat.js';
 
@@ -23,6 +24,12 @@ async function load(id, withData = true) {
   return rows[0];
 }
 
+// Un jeu de données rattaché à un projet suit ses droits ; sans projet, il est à tout le labo
+router.param('id', (req, _res, next, id) => {
+  const write = req.method !== 'GET';
+  assertDataset(req.user, id, { write }).then((role) => { req.datasetRole = role; next(); }, next);
+});
+
 // Liste (sans les données), du plus récent au plus ancien ; recherche dans le titre
 router.get('/', async (req, res) => {
   const q = String(req.query.q ?? '').trim();
@@ -32,18 +39,20 @@ router.get('/', async (req, res) => {
      ${FROM}
      WHERE ($1 OR NOT d.archived) AND ($2 = '' OR d.title ILIKE '%' || $2 || '%')
        AND ($3::text IS NULL OR d.kind = $3)
+       AND (d.project_id IS NULL OR d.project_id IN ${visibleProjects('$4')})
      ORDER BY d.updated_at DESC LIMIT 300`,
-    [req.query.archived === 'true', q, KINDS.includes(req.query.kind) ? req.query.kind : null],
+    [req.query.archived === 'true', q, KINDS.includes(req.query.kind) ? req.query.kind : null, req.user.id],
   );
   res.json(rows);
 });
 
 router.get('/:id', async (req, res) => {
-  res.json(await load(req.params.id));
+  res.json({ ...await load(req.params.id), role: req.datasetRole });
 });
 
 router.post('/', async (req, res) => {
   const data = cleanDataset(req.body?.data);
+  await assertProject(req.user, projectOf(req.body?.project_id), { write: true });
   const { rows } = await query(
     `INSERT INTO datasets (title, kind, data, project_id, created_by, updated_by)
      VALUES ($1, $2, $3, $4, $5, $5) RETURNING id`,
@@ -60,6 +69,7 @@ router.put('/:id', async (req, res) => {
   let sql = `UPDATE datasets SET title = $2, kind = $3, data = $4, updated_by = $5, updated_at = now(), revision = revision + 1`;
   if (req.body?.project_id !== undefined) {
     params.push(projectOf(req.body.project_id));
+    await assertProject(req.user, params.at(-1), { write: true });
     sql += `, project_id = $${params.length}`;
   }
   sql += ' WHERE id = $1 AND NOT archived AND ($6::int IS NULL OR revision = $6) RETURNING revision, updated_at';

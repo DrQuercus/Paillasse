@@ -4,6 +4,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { config } from '../config.js';
 import { query, tx } from '../db.js';
+import { assertProject, projectRole } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { blobPath, storeBlob, tmpDir } from '../lib/storage.js';
 import { hashPassword, sessionUser, verifyPassword } from '../auth.js';
@@ -31,7 +32,7 @@ async function checkImage(db, projectId, imageId) {
 }
 
 /**
- * Routes d'un tableau. Le même routeur sert au propriétaire (connecté)
+ * Routes d'un tableau. Le même routeur sert aux membres du projet (connectés)
  * et aux invités d'un lien partagé ; seule la façon de résoudre le projet change.
  * resolve(req) → { projectId, canEdit, actor: { userId, name } }
  */
@@ -221,15 +222,17 @@ function boardRouter(resolve) {
 }
 
 // ---------------------------------------------------------------------------
-// Propriétaire (connecté) : /api/projects/:projectId/board
+// Membres du projet (connectés) : /api/projects/:projectId/board
 // ---------------------------------------------------------------------------
 
 export const ownerBoard = Router({ mergeParams: true });
 
-async function ownerProject(req) {
+/** Le projet, si le compte y a accès ; owner : seul le propriétaire gère le lien partagé. */
+async function ownerProject(req, opts) {
+  const role = await assertProject(req.user, req.params.projectId, opts);
   const { rows } = await query('SELECT id, board_share_token, board_share_mode, board_share_password_hash FROM projects WHERE id = $1', [req.params.projectId]);
   if (!rows[0]) throw notFound('Projet');
-  return rows[0];
+  return { ...rows[0], role };
 }
 
 const shareInfo = (p) => ({
@@ -242,7 +245,7 @@ const shareInfo = (p) => ({
 ownerBoard.get('/share', async (req, res) => res.json(shareInfo(await ownerProject(req))));
 
 ownerBoard.put('/share', async (req, res) => {
-  const p = await ownerProject(req);
+  const p = await ownerProject(req, { owner: true });
   const b = req.body ?? {};
   let result;
   if (!b.enabled) {
@@ -271,7 +274,8 @@ ownerBoard.put('/share', async (req, res) => {
 
 ownerBoard.use(boardRouter(async (req) => {
   const p = await ownerProject(req);
-  return { projectId: p.id, canEdit: true, actor: { userId: req.user.id, name: req.user.display_name } };
+  // Un administrateur qui n'est pas membre regarde sans toucher
+  return { projectId: p.id, canEdit: p.role !== 'admin', actor: { userId: req.user.id, name: req.user.display_name } };
 }));
 
 // ---------------------------------------------------------------------------
@@ -295,9 +299,9 @@ const guestSignature = (token, version, expires) =>
   crypto.createHmac('sha256', config.sessionSecret).update(`board:${token}:${version}:${expires}`).digest('base64url');
 
 async function sharedAccess(req, p) {
-  // Le propriétaire connecté n'a pas besoin du mot de passe
+  // Les membres connectés n'ont pas besoin du mot de passe ; les autres comptes sont des invités comme les autres
   const user = await sessionUser(req);
-  if (user) return { userId: user.id, name: user.display_name };
+  if (user && await projectRole(user.id, p.id)) return { userId: user.id, name: user.display_name, member: true };
   const token = req.params.token;
   const [expires, signature] = String(req.cookies?.[guestCookieName(token)] ?? '').split('.');
   if (!expires || !signature || Date.now() > Number(expires)) return null;
@@ -307,7 +311,7 @@ async function sharedAccess(req, p) {
   try {
     name = decodeURIComponent(req.get('x-paillasse-guest') ?? '').trim().slice(0, 40) || 'Invité';
   } catch { /* nom mal encodé : on garde « Invité » */ }
-  return { userId: null, name };
+  return { userId: null, name, member: false };
 }
 
 sharedBoard.get('/', async (req, res) => {
@@ -333,5 +337,5 @@ sharedBoard.use('/board', boardRouter(async (req) => {
   const p = await sharedProject(req.params.token);
   const actor = await sharedAccess(req, p);
   if (!actor) throw new HttpError(401, 'Mot de passe requis.');
-  return { projectId: p.id, canEdit: actor.userId !== null || p.board_share_mode === 'edit', actor };
+  return { projectId: p.id, canEdit: actor.member || p.board_share_mode === 'edit', actor };
 }));

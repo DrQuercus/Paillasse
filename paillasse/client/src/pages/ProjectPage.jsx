@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Archive, FilePlus2, Pencil, Trash2 } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Archive, Eye, FilePlus2, Pencil, Trash2, UserPlus, Users } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import EntryList from '../components/EntryList.jsx';
 import ProjectDialog from '../components/ProjectDialog.jsx';
 import ProjectTabs from '../components/ProjectTabs.jsx';
 import PurgeDialog from '../components/admin/PurgeDialog.jsx';
+import { AccessChip, ShareDialog } from '../components/Sharing.jsx';
 
 export default function ProjectPage() {
   const { id } = useParams();
@@ -16,6 +17,8 @@ export default function ProjectPage() {
   const [project, setProject] = useState(null);
   const [entries, setEntries] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   // Recharger quand la liste des projets change (renommage, nouvelle entrée…)
   useEffect(() => {
@@ -25,8 +28,9 @@ export default function ProjectPage() {
         if (cancelled) return;
         setProject(p);
         setEntries(e);
+        setLoadError('');
       })
-      .catch((err) => notify(err.message, 'error'));
+      .catch((err) => { if (!cancelled) setLoadError(err.message); });
     return () => { cancelled = true; };
   }, [id, projects, notify]);
 
@@ -42,28 +46,63 @@ export default function ProjectPage() {
     }
   };
 
-  if (!project) return <div className="page"><p className="muted">Chargement…</p></div>;
+  const reloadProject = () => api.get(`/projects/${id}`).then(setProject).catch(() => {});
+
+  if (loadError) {
+    return (
+      <div className="page">
+        <div className="empty">
+          <p>{loadError}</p>
+          <p className="muted small">Un projet privé n’est visible que de son propriétaire et des comptes qui ont accepté son invitation.</p>
+          <Link to="/" className="btn">Retour au journal</Link>
+        </div>
+      </div>
+    );
+  }
+  if (!project || project.id !== id) return <div className="page"><p className="muted">Chargement…</p></div>;
+  const owner = project.role === 'owner';
+  const readOnly = project.role === 'admin';
 
   return (
     <div className="page">
       <header className="page-head project-head" style={{ '--project': project.color }}>
         <div>
           <h1>{project.name}</h1>
+          <p className="project-access">
+            <AccessChip project={project} onClick={() => setSharing(true)} />
+            {!owner && <span className="muted small">Projet de {project.owner_name}</span>}
+          </p>
           {project.description && <p className="page-lead">{project.description}</p>}
         </div>
         <div className="head-actions">
-          <button type="button" className="btn btn-ghost" onClick={() => setEditing(true)}><Pencil size={15} /> Modifier</button>
-          {!project.archived && (
-            <button type="button" className="btn btn-ghost" onClick={archive}><Archive size={15} /> Archiver</button>
+          {owner && (
+            <>
+              <button type="button" className="btn btn-ghost" onClick={() => setSharing(true)}><UserPlus size={15} /> Partager</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setEditing(true)}><Pencil size={15} /> Modifier</button>
+              {!project.archived && (
+                <button type="button" className="btn btn-ghost" onClick={archive}><Archive size={15} /> Archiver</button>
+              )}
+            </>
+          )}
+          {project.role === 'member' && (
+            <button type="button" className="btn btn-ghost" onClick={() => setSharing(true)}><Users size={15} /> Membres</button>
           )}
           {user?.is_admin && (
             <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setPurging(true)} title="Supprimer le projet et son contenu (administrateur)"><Trash2 size={15} /> Supprimer</button>
           )}
-          <button type="button" className="btn btn-primary" onClick={() => openNewEntry(id)}>
-            <FilePlus2 size={16} /> Nouvelle entrée
-          </button>
+          {!readOnly && (
+            <button type="button" className="btn btn-primary" onClick={() => openNewEntry(id)}>
+              <FilePlus2 size={16} /> Nouvelle entrée
+            </button>
+          )}
         </div>
       </header>
+      {readOnly && (
+        <p className="notice readonly-notice">
+          <Eye size={15} aria-hidden="true" />
+          <span>Vous n’êtes pas membre de ce projet : vous le consultez en tant qu’administrateur, <strong>en lecture seule</strong>. Il n’apparaît pas dans votre barre latérale.</span>
+        </p>
+      )}
       {purging && (
         <PurgeDialog
           kind="projects"
@@ -79,11 +118,12 @@ export default function ProjectPage() {
       {entries?.length === 0 && (
         <div className="empty">
           <p>Aucune entrée dans ce projet.</p>
-          <button type="button" className="btn btn-primary" onClick={() => openNewEntry(id)}>Créer la première entrée</button>
+          {!readOnly && <button type="button" className="btn btn-primary" onClick={() => openNewEntry(id)}>Créer la première entrée</button>}
         </div>
       )}
       {entries?.length > 0 && <EntryList entries={entries} showProject={false} />}
       {editing && <ProjectDialog project={project} onClose={() => setEditing(false)} onSaved={setProject} />}
+      {sharing && <ShareDialog project={project} onClose={() => setSharing(false)} onChanged={reloadProject} />}
     </div>
   );
 }

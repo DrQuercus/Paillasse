@@ -3,6 +3,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { config } from '../config.js';
 import { query } from '../db.js';
+import { assertAttachment, assertEntry } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { blobPath, storeBlob, tmpDir } from '../lib/storage.js';
 
@@ -18,7 +19,7 @@ const fixName = (name) => {
 const COLUMNS = 'id, sha256, filename, mime_type, size_bytes, created_at, derived_from, edit_params';
 
 /** Champs facultatifs d'une image retouchée : original et paramètres de retouche. */
-async function readDerivation(body) {
+async function readDerivation(body, user) {
   const derivedFrom = body?.derived_from || null;
   let editParams = null;
   if (body?.edit_params) {
@@ -29,10 +30,8 @@ async function readDerivation(body) {
       throw new HttpError(400, 'Paramètres de retouche illisibles.');
     }
   }
-  if (derivedFrom) {
-    const { rows } = await query('SELECT id FROM attachments WHERE id = $1', [derivedFrom]);
-    if (!rows[0]) throw notFound('Image d\'origine');
-  }
+  // L'original d'une image retouchée : une pièce jointe que ce compte peut voir
+  if (derivedFrom) await assertAttachment(user, derivedFrom);
   return { derivedFrom, editParams };
 }
 
@@ -40,10 +39,11 @@ router.post('/entries/:id/attachments', upload.single('file'), async (req, res) 
   const file = req.file;
   if (!file) throw new HttpError(400, 'Aucun fichier reçu (champ « file »).');
   try {
+    await assertEntry(req.user, req.params.id, { write: true });
     const { rows: [entry] } = await query('SELECT status FROM entries WHERE id = $1', [req.params.id]);
     if (!entry) throw notFound('Entrée');
     if (entry.status === 'locked') throw new HttpError(409, 'Entrée verrouillée : ajoutez le fichier dans un addendum.');
-    const { derivedFrom, editParams } = await readDerivation(req.body);
+    const { derivedFrom, editParams } = await readDerivation(req.body, req.user);
     const sha = await storeBlob(file.path);
     const { rows } = await query(
       `INSERT INTO attachments
@@ -61,6 +61,7 @@ router.post('/entries/:id/attachments', upload.single('file'), async (req, res) 
 });
 
 router.get('/entries/:id/attachments', async (req, res) => {
+  await assertEntry(req.user, req.params.id);
   const { rows } = await query(
     `SELECT ${COLUMNS} FROM attachments WHERE entry_id = $1 ORDER BY created_at`,
     [req.params.id],
@@ -69,6 +70,7 @@ router.get('/entries/:id/attachments', async (req, res) => {
 });
 
 router.get('/attachments/:id', async (req, res) => {
+  await assertAttachment(req.user, req.params.id);
   const { rows } = await query(`SELECT entry_id, ${COLUMNS} FROM attachments WHERE id = $1`, [req.params.id]);
   if (!rows[0]) throw notFound('Fichier');
   res.json(rows[0]);
@@ -78,6 +80,7 @@ router.get('/attachments/:id', async (req, res) => {
 const RISKY = /html|svg|xml|javascript|ecmascript/i;
 
 router.get('/files/:id', async (req, res) => {
+  await assertAttachment(req.user, req.params.id);
   const { rows } = await query('SELECT sha256, filename, mime_type FROM attachments WHERE id = $1', [req.params.id]);
   const f = rows[0];
   if (!f) throw notFound('Fichier');

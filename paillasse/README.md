@@ -8,6 +8,19 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
 
 - **Entrées de cahier** rangées par projet, avec date d'expérience, éditeur riche (titres, tableaux,
   listes de tâches, indices/exposants, surlignage, liens, code) et **sauvegarde automatique**.
+- **Projets privés ou partagés** : à la création d'un projet, on choisit *Privé* (vous seul le voyez) ou
+  *Partagé* avec les comptes cochés. Chaque compte invité reçoit une **invitation** (en tête du Journal, et
+  « 1 invitation » dans la barre latérale) et ne voit rien du projet tant qu'il ne l'a pas **acceptée** ; il peut
+  aussi la refuser. Un membre lit et écrit dans le projet comme son propriétaire ; seul le propriétaire le renomme,
+  l'archive, règle le lien public du tableau et gère le partage (bouton « Partager » : inviter d'autres comptes,
+  annuler une invitation, réinviter après un refus, retirer un membre). Un membre peut quitter le projet
+  (« Membres » › « Quitter le projet »). Tout ce qui est rangé dans un projet suit ses droits : entrées, versions,
+  pièces jointes, impression, recherche, journal, tableau d'idées, séquences et jeux de données rattachés, export.
+  Ce qui n'appartient à aucun projet reste commun au labo (registre de séquences sans projet, stockage, produits,
+  marqueurs, modèles) ; au stockage, un tube relié à une entrée, une séquence ou un projet privés affiche « entrée
+  d'un projet privé » au lieu du titre. Un projet privé répond « introuvable » aux autres comptes, comme s'il
+  n'existait pas. **Seul l'administrateur voit tout**, depuis la page Maintenance (voir plus bas), en lecture
+  seule dans les projets dont il n'est pas membre.
 - **Images et fichiers** : glisser-déposer ou coller une capture directement dans la page, ou joindre
   n'importe quel fichier (gels, spectres, `.mrc`, PDF…). Stockage adressé par SHA-256, sans doublon.
 - **Retouche d'image non destructive** (double-clic sur une image) : recadrage, quarts de tour, miroirs,
@@ -210,8 +223,8 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
     première connexion), réinitialiser un mot de passe, déconnecter de tous ses appareils, rendre administrateur,
     désactiver ou réactiver, **supprimer** : le compte ne peut plus se connecter, son identifiant est libéré et son
     mot de passe effacé ; au choix ses entrées restent signées de son nom (ou « Compte supprimé » : anonymisé), ou
-    elles partent avec lui (entrées, séquences, jeux de données, modèles, post-it ; ses tubes restent au stockage,
-    ses projets partagés reviennent à l'administrateur). Un compte dont plus rien ne porte le nom s'efface
+    elles partent avec lui (entrées, séquences, jeux de données, modèles, post-it ; ses tubes restent au stockage).
+    Ses projets passent à leur plus ancien membre, ou à l'administrateur s'ils n'en ont pas. Un compte dont plus rien ne porte le nom s'efface
     entièrement. Il reste toujours au moins un administrateur actif. Chacun peut changer son mot de passe (icône
     clé, en bas à gauche).
   - *Sauvegardes* : destinations vers un dossier du serveur (NAS monté, disque externe) ou une autre machine par
@@ -225,7 +238,14 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
     (en cas d'erreur rien ne change), fichiers absents recopiés, schéma remis à niveau ; les destinations,
     l'historique des sauvegardes et le journal d'administration sont conservés. « Revenir à cette copie » annule
     une restauration.
-  - *Données* : **suppression définitive** d'entrées (filtrées par projet, auteur, état, date ; même verrouillées,
+  - *Données* : **tout le cahier, projets privés compris** (lui seul le voit) : ouvrir une entrée, un projet ou une
+    séquence d'un projet dont il n'est pas membre l'affiche **en lecture seule** (bandeau « Lecture seule » ; rien ne
+    s'y écrit, le serveur refuse). Colonne « Accès » des projets : propriétaire, membres, invitations en attente ;
+    un clic permet de **confier le projet** à un membre qui a accepté (propriétaire parti, par exemple ; l'ancien
+    reste membre) ou de retirer quelqu'un. Les invitations restent du ressort du propriétaire : personne n'entre
+    dans un projet sans l'avoir accepté. **Export complet** (tous les projets) ; celui de la barre latérale
+    (« Exporter mon cahier ») ne contient que les projets de la personne et ce qui est commun au labo.
+    **Suppression définitive** d'entrées (filtrées par projet, auteur, état, date ; même verrouillées,
     avec leurs addenda, versions figées et pièces jointes), de projets entiers, de séquences, d'appareils du
     stockage avec leur contenu, de tubes retirés, de jeux de données, produits, marqueurs et modèles (un modèle de
     base est retiré, sinon il reviendrait à la mise à jour suivante). Chaque suppression montre d'abord ce qui part
@@ -245,7 +265,8 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
     serveur depuis le démarrage (erreurs en rouge).
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
-- **Export complet** en un clic : zip avec `data.json`, chaque entrée en HTML autonome et tous les fichiers.
+- **Export** en un clic : zip avec `data.json`, chaque entrée en HTML autonome et tous les fichiers (vos projets et
+  ceux où vous êtes membre ; l'administrateur exporte tout depuis Maintenance › Données).
 
 Côté base de données, les tables `entry_versions` et `attachments` sont en ajout seul et une entrée
 verrouillée ne peut plus changer : des triggers PostgreSQL refusent toute modification, même en SQL direct.
@@ -253,6 +274,11 @@ Seule exception : la suppression définitive par un administrateur (page Mainten
 une transaction marquée (`SET LOCAL paillasse.purge = 'on'`), après copie de sécurité, et toujours d'un bloc
 (une entrée avec toutes ses versions, jamais une version isolée) : ce qui reste garde des empreintes valides.
 Le journal d'administration, lui, ne se modifie ni ne s'efface jamais.
+
+Mise à jour depuis une version sans partage (migration `014_project_sharing.sql`) : chaque projet existant devient
+privé à son créateur, et tout compte qui y a déjà écrit une entrée en devient membre (personne ne perd de vue ce
+sur quoi il a travaillé). Un projet dont le créateur a été supprimé passe à son plus ancien membre. Pour ouvrir un
+projet à d'autres ensuite : bouton « Partager » sur la page du projet.
 
 ## Prérequis
 
@@ -463,6 +489,7 @@ server/
   src/lib/inventory.js         stockage : qui contient quoi, positions A1, chemins, validation (copié côté client)
   src/lib/backup.js            sauvegardes (dossier ou SSH), planification, restauration atomique, clé SSH
   src/lib/jobs.js              tâches longues suivies par la page Maintenance ; settings.js, serverLog.js
+  src/lib/access.js            qui voit quoi : projets visibles, rôle (propriétaire, membre, admin en lecture seule)
   src/lib/purge.js             suppression définitive : aperçu (ce qui part, ce qui reste), entrées, projets,
                                séquences, stockage, comptes
   src/routes/admin.js          page Maintenance : comptes, sauvegardes, base, fichiers, serveur (administrateurs)
@@ -490,6 +517,7 @@ client/
                                cryo.jsx : dewar, canister, puck, boîte à grilles, dessin des grilles, criblage
   src/lib/gridbox.js           plan des boîtes à grilles (logements, cran, vis, numéros), testé
   src/pages/StoragePage.jsx    page Stockage
+  src/components/Sharing.jsx   partage : choix des comptes, dialogue « Partager », invitations reçues
   src/pages/MaintenancePage.jsx  page Maintenance ; src/components/admin/ : un onglet par fichier
 deploy/                        service systemd, sauvegarde et son timer
 ```
@@ -502,14 +530,20 @@ deploy/                        service systemd, sauvegarde et son timer
 - Le contenu est du JSON ProseMirror ; le texte brut (`plain_text`) est recalculé côté serveur pour la recherche.
 - Les empreintes sont calculées sur du JSON canonique (clés triées), car `jsonb` réordonne les clés.
 - `created_by` est présent partout pour pouvoir passer au multi-utilisateur sans migration lourde.
+- Toute route qui lit ou écrit quelque chose de rangé dans un projet passe par `server/src/lib/access.js`
+  (`assertProject`, `assertEntry`… pour un élément, `visibleProjects` pour une liste) : un projet invisible répond 404,
+  une écriture sans être membre 403.
 
 ## Limites connues de la v0.1
 
 - Registre limité aux séquences : pas encore de fiches de souches ou de protéines.
 - Cryo-EM : le criblage et les sessions se notent à la main (pas de lien avec EPU, SerialEM ou cryoSPARC).
 - Pas de liens entre entrées autres que les addenda.
-- Deux rôles seulement : administrateur (page Maintenance) ou non ; hors de là, tout compte connecté voit tout
-  (les invités d'un tableau partagé, eux, ne voient que ce tableau).
+- Partage par projet seulement, sans rôles plus fins : un membre lit et écrit tout le projet (pas de membre en
+  lecture seule, pas d'entrée privée dans un projet partagé). Le stockage, le registre des séquences sans projet,
+  les produits, les marqueurs et les modèles sont communs à tout le labo.
+- Pas de notification par courriel : une invitation apparaît à la prochaine ouverture du cahier (ou dans les
+  deux minutes).
 - La restauration depuis la page remplace toute la base : pas de restauration d'une seule entrée (le journal des
   versions de chaque entrée sert à ça).
 - Tableau partagé : si deux personnes modifient le même post-it au même moment, la dernière modification l'emporte.

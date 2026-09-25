@@ -3,6 +3,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { config } from '../config.js';
 import { query, tx } from '../db.js';
+import { assertProject, assertSequence, visibleProjects } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { canonicalize, sha256, sha256File } from '../lib/hash.js';
 import { blobPath, storeBlob, tmpDir } from '../lib/storage.js';
@@ -52,9 +53,21 @@ async function insertSequence(db, parsed, userId, projectId, origin = null) {
   return rows[0];
 }
 
+// --- Droits ----------------------------------------------------------------------
+// Une séquence rattachée à un projet suit ses droits ; sans projet, elle est à tout le labo.
+// Écrire : modifier, archiver, figer une version, enregistrer un produit de PCR (fige la matrice).
+
+const WRITES = /^\/[^/]+(\/(archive|versions|pcr\/create))?$/;
+
+router.param('id', (req, _res, next, id) => {
+  const write = (req.method === 'PUT' && WRITES.test(req.path)) || (req.method === 'POST' && WRITES.test(req.path) && req.path.includes('/', 1));
+  assertSequence(req.user, id, { write }).then((role) => { req.sequenceRole = role; next(); }, next);
+});
+
 // --- Registre -------------------------------------------------------------------
 
 router.get('/', async (req, res) => {
+  if (req.query.project_id) await assertProject(req.user, req.query.project_id);
   const q = String(req.query.q ?? '').trim();
   const bases = q.replace(/\s+/g, '');
   const isDna = bases.length >= 8 && /^[ACGTURYSWKMBDHVN]+$/i.test(bases);
@@ -69,15 +82,22 @@ router.get('/', async (req, res) => {
        AND ($1 = '' OR s.name ILIKE $2 OR s.code ILIKE $2 OR s.description ILIKE $2
             OR ($4 AND (strpos(upper(s.sequence), $5) > 0 OR strpos(upper(s.sequence), $6) > 0)))
        AND ($3::uuid IS NULL OR s.project_id = $3)
+       AND ($3::uuid IS NOT NULL OR s.project_id IS NULL OR s.project_id IN ${visibleProjects('$7')})
      ORDER BY s.updated_at DESC
      LIMIT 500`,
-    [q, like, req.query.project_id || null, isDna, bases.toUpperCase(), isDna ? revcomp(bases) : ''],
+    [q, like, req.query.project_id || null, isDna, bases.toUpperCase(), isDna ? revcomp(bases) : '', req.user.id],
   );
   res.json(rows);
 });
 
 // Import de fichiers : .dna, .gb/.gbk, .fa/.fasta (plusieurs à la fois)
 router.post('/import', upload.array('files', 30), async (req, res) => {
+  try {
+    await assertProject(req.user, req.body?.project_id || null, { write: true });
+  } catch (err) {
+    for (const file of req.files ?? []) fs.promises.unlink(file.path).catch(() => {});
+    throw err;
+  }
   const created = [];
   const errors = [];
   for (const file of req.files ?? []) {
@@ -108,6 +128,7 @@ router.post('/import', upload.array('files', 30), async (req, res) => {
 // Création : séquence collée (brute, FASTA ou GenBank) ou vide
 router.post('/', async (req, res) => {
   const b = req.body ?? {};
+  await assertProject(req.user, b.project_id || null, { write: true });
   const text = String(b.text ?? '').trim();
   const records = text ? parseAny(Buffer.from(text), b.name || 'Nouvelle séquence') : [{ sequence: '', features: [], primers: [] }];
   const created = await tx(async (db) => {
@@ -142,11 +163,12 @@ async function loadSequence(id) {
   return { ...s, gc_percent: gcPercent(s.sequence), files };
 }
 
-router.get('/:id', async (req, res) => res.json(await loadSequence(req.params.id)));
+router.get('/:id', async (req, res) => res.json({ ...await loadSequence(req.params.id), role: req.sequenceRole }));
 
 router.put('/:id', async (req, res) => {
   const b = req.body ?? {};
   if (!Number.isInteger(b.revision)) throw new HttpError(400, 'Révision manquante.');
+  if (b.project_id) await assertProject(req.user, b.project_id, { write: true });
   const data = b.data ? normalizeSequenceData(b.data) : null;
   const name = b.name === undefined ? null : String(b.name).trim().slice(0, 300) || 'Sans nom';
   const { rows } = await query(
@@ -388,6 +410,7 @@ router.post('/:id/pcr', async (req, res) => {
 
 /** Enregistre un produit de PCR comme nouvelle séquence, en gardant sa recette. */
 router.post('/:id/pcr/create', async (req, res) => {
+  if (req.body?.project_id) await assertProject(req.user, req.body.project_id, { write: true });
   const [forward, reverse] = pcrPrimers(req.body);
   const index = Number(req.body?.product_index) || 0;
   const created = await tx(async (db) => {

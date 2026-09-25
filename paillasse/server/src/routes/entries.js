@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { query, tx } from '../db.js';
+import { assertEntry, assertProject, visibleProjects } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { EMPTY_DOC, docToPlainText, isDoc } from '../lib/doc.js';
 import { createVersion, verifyEntry } from '../lib/versions.js';
@@ -18,7 +19,8 @@ const ENTRY_COLUMNS = `e.id, e.project_id, e.parent_entry_id, e.title, e.entry_d
   e.created_at, e.updated_at, p.name AS project_name, p.color AS project_color,
   cu.display_name AS created_by_name, lu.display_name AS locked_by_name`;
 
-async function loadEntry(id, db = { query }) {
+/** viewer : le compte qui regarde ; les addenda et l'entrée parente d'un autre projet invisible sont tus. */
+async function loadEntry(id, viewer = null, db = { query }) {
   const { rows } = await db.query(
     `SELECT ${ENTRY_COLUMNS}
      FROM entries e
@@ -30,23 +32,26 @@ async function loadEntry(id, db = { query }) {
   );
   if (!rows[0]) throw notFound('Entrée');
   const entry = rows[0];
+  const seen = viewer && !viewer.is_admin ? `AND project_id IN ${visibleProjects('$2')}` : 'AND $2::uuid IS NULL';
   const [{ rows: addenda }, { rows: parent }] = await Promise.all([
     db.query(
       `SELECT id, title, entry_date, status FROM entries
-       WHERE parent_entry_id = $1 AND NOT archived ORDER BY created_at`,
-      [id],
+       WHERE parent_entry_id = $1 AND NOT archived ${seen} ORDER BY created_at`,
+      [id, viewer && !viewer.is_admin ? viewer.id : null],
     ),
     entry.parent_entry_id
-      ? db.query('SELECT id, title, entry_date, status FROM entries WHERE id = $1', [entry.parent_entry_id])
+      ? db.query(`SELECT id, title, entry_date, status FROM entries WHERE id = $1 ${seen}`, [entry.parent_entry_id, viewer && !viewer.is_admin ? viewer.id : null])
       : { rows: [] },
   ]);
   return { ...entry, addenda, parent: parent[0] ?? null };
 }
 
-// Liste chronologique (journal) ou par projet
+// Liste chronologique (journal : projets visibles) ou d'un projet (droit de lecture vérifié)
 router.get('/', async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const projectId = req.query.project_id || null;
+  if (projectId) await assertProject(req.user, projectId);
   const { rows } = await query(
     `SELECT e.id, e.title, e.entry_date, e.status, e.project_id, e.parent_entry_id,
             e.version_count, e.created_at, e.updated_at,
@@ -54,9 +59,10 @@ router.get('/', async (req, res) => {
             left(e.plain_text, 220) AS excerpt
      FROM entries e JOIN projects p ON p.id = e.project_id
      WHERE NOT e.archived AND ($1::uuid IS NULL OR e.project_id = $1)
+       AND ($1::uuid IS NOT NULL OR e.project_id IN ${visibleProjects('$4')})
      ORDER BY e.entry_date DESC, e.created_at DESC
      LIMIT $2 OFFSET $3`,
-    [req.query.project_id || null, limit, offset],
+    [projectId, limit, offset, req.user.id],
   );
   res.json(rows);
 });
@@ -64,6 +70,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const b = req.body ?? {};
   if (!b.project_id) throw new HttpError(400, 'Choisissez un projet.');
+  const role = await assertProject(req.user, b.project_id, { write: true });
   const title = String(b.title ?? '').trim() || 'Sans titre';
   const entryDate = DATE.test(b.entry_date) ? b.entry_date : today();
   let content = EMPTY_DOC;
@@ -77,11 +84,12 @@ router.post('/', async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
     [b.project_id, title, entryDate, JSON.stringify(content), docToPlainText(content), req.user.id],
   );
-  res.status(201).json(await loadEntry(rows[0].id));
+  res.status(201).json({ ...(await loadEntry(rows[0].id, req.user)), role });
 });
 
 router.get('/:id', async (req, res) => {
-  res.json(await loadEntry(req.params.id));
+  const role = await assertEntry(req.user, req.params.id);
+  res.json({ ...(await loadEntry(req.params.id, req.user)), role });
 });
 
 // Sauvegarde automatique de la copie de travail (brouillon uniquement)
@@ -91,6 +99,8 @@ router.put('/:id', async (req, res) => {
   if (b.content !== undefined && !isDoc(b.content)) throw new HttpError(400, 'Contenu invalide.');
   if (b.entry_date !== undefined && !DATE.test(b.entry_date)) throw new HttpError(400, 'Date invalide.');
   const title = b.title === undefined ? null : String(b.title).trim() || 'Sans titre';
+  await assertEntry(req.user, req.params.id, { write: true });
+  if (b.project_id) await assertProject(req.user, b.project_id, { write: true });
 
   const { rows } = await query(
     `UPDATE entries SET
@@ -130,6 +140,7 @@ router.put('/:id', async (req, res) => {
 router.post('/:id/blocks', async (req, res) => {
   const type = req.body?.node?.type;
   const node = type === 'gelFigure' ? cleanGelNode(req.body.node) : type === 'statFigure' ? cleanStatNode(req.body.node) : cleanCalcNode(req.body?.node);
+  await assertEntry(req.user, req.params.id, { write: true });
   const result = await tx(async (db) => {
     const { rows: [entry] } = await db.query('SELECT status, content FROM entries WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!entry) throw notFound('Entrée');
@@ -156,6 +167,7 @@ router.post('/:id/blocks', async (req, res) => {
 });
 
 router.get('/:id/versions', async (req, res) => {
+  await assertEntry(req.user, req.params.id);
   const { rows } = await query(
     `SELECT v.id, v.version_number, v.kind, v.note, v.title, v.created_at, v.hash, v.prev_hash,
             u.display_name AS author
@@ -167,6 +179,7 @@ router.get('/:id/versions', async (req, res) => {
 });
 
 router.get('/:id/versions/:number', async (req, res) => {
+  await assertEntry(req.user, req.params.id);
   const { rows } = await query(
     `SELECT v.*, u.display_name AS author
      FROM entry_versions v JOIN users u ON u.id = v.created_by
@@ -178,11 +191,13 @@ router.get('/:id/versions/:number', async (req, res) => {
 });
 
 router.post('/:id/versions', async (req, res) => {
+  await assertEntry(req.user, req.params.id, { write: true });
   const result = await tx((db) => createVersion(db, req.params.id, req.user.id, { note: req.body?.note ?? '' }));
   res.status(result.unchanged ? 200 : 201).json(result);
 });
 
 router.post('/:id/lock', async (req, res) => {
+  const role = await assertEntry(req.user, req.params.id, { write: true });
   await tx(async (db) => {
     await createVersion(db, req.params.id, req.user.id, { kind: 'lock', note: req.body?.note ?? '' });
     await db.query(
@@ -191,11 +206,12 @@ router.post('/:id/lock', async (req, res) => {
       [req.params.id, req.user.id],
     );
   });
-  res.json(await loadEntry(req.params.id));
+  res.json({ ...(await loadEntry(req.params.id, req.user)), role });
 });
 
 router.post('/:id/addendum', async (req, res) => {
-  const parent = await loadEntry(req.params.id);
+  const role = await assertEntry(req.user, req.params.id, { write: true });
+  const parent = await loadEntry(req.params.id, req.user);
   const content = {
     type: 'doc',
     content: [
@@ -212,11 +228,12 @@ router.post('/:id/addendum', async (req, res) => {
     [parent.project_id, parent.id, `Addendum : ${parent.title}`, today(),
       JSON.stringify(content), docToPlainText(content), req.user.id],
   );
-  res.status(201).json(await loadEntry(rows[0].id));
+  res.status(201).json({ ...(await loadEntry(rows[0].id, req.user)), role });
 });
 
 // Archive un brouillon créé par erreur (il reste dans la base et dans les exports)
 router.post('/:id/archive', async (req, res) => {
+  await assertEntry(req.user, req.params.id, { write: true });
   const { rowCount } = await query(
     `UPDATE entries SET archived = true, updated_at = now() WHERE id = $1 AND status = 'draft'`,
     [req.params.id],
@@ -226,12 +243,14 @@ router.post('/:id/archive', async (req, res) => {
 });
 
 router.get('/:id/verify', async (req, res) => {
+  await assertEntry(req.user, req.params.id);
   res.json(await verifyEntry({ query }, req.params.id));
 });
 
 // Page imprimable (Fichier > Imprimer > Enregistrer en PDF)
 router.get('/:id/print', async (req, res) => {
-  const entry = await loadEntry(req.params.id);
+  await assertEntry(req.user, req.params.id);
+  const entry = await loadEntry(req.params.id, req.user);
   let version = null;
   const n = req.query.version === 'last' ? entry.version_count : Number(req.query.version);
   if (n > 0) {

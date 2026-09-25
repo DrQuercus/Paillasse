@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BookOpen, Calculator, ChartColumn, Columns4, Dna, Download, FilePlus2, KeyRound, LayoutTemplate, LogOut, Menu, Plus, Search, Snowflake, Wrench, X,
+  BookOpen, Calculator, ChartColumn, Columns4, Dna, Download, FilePlus2, KeyRound, LayoutTemplate, LogOut, MailPlus, Menu, Plus, Search, Snowflake, Users, Wrench, X,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
@@ -9,7 +9,7 @@ import PasswordDialog from './PasswordDialog.jsx';
 import ProjectDialog from './ProjectDialog.jsx';
 
 export default function Sidebar() {
-  const { user, setUser, projects, openNewEntry, notify } = useApp();
+  const { user, setUser, projects, invitations, openNewEntry, notify } = useApp();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [projectDialog, setProjectDialog] = useState(false);
@@ -72,6 +72,12 @@ export default function Sidebar() {
 
         <nav className="sidebar-nav">
           <NavLink to="/" end className="nav-link"><BookOpen size={16} /> Journal</NavLink>
+          {invitations.length > 0 && (
+            <Link to="/" className="nav-link nav-invitations">
+              <MailPlus size={16} /> {invitations.length > 1 ? `${invitations.length} invitations` : '1 invitation'}
+              <span className="nav-badge" aria-hidden="true">{invitations.length}</span>
+            </Link>
+          )}
           <NavLink to="/sequences" className="nav-link"><Dna size={16} /> Séquences</NavLink>
           <NavLink to="/storage" className="nav-link"><Snowflake size={16} /> Stockage</NavLink>
           <NavLink to="/gels" className="nav-link"><Columns4 size={16} /> Gels</NavLink>
@@ -95,6 +101,11 @@ export default function Sidebar() {
                 <NavLink to={`/projects/${p.id}`} className="nav-link project-link">
                   <span className="project-dot" style={{ background: p.color }} aria-hidden="true" />
                   <span className="project-name">{p.name}</span>
+                  {(p.member_count > 0 || p.role === 'member') && (
+                    <span className="project-shared" title={p.role === 'member' ? `Partagé par ${p.owner_name}` : `Partagé avec ${p.member_count} membre(s)`}>
+                      <Users size={13} aria-hidden="true" /><span className="sr-only">partagé</span>
+                    </span>
+                  )}
                   <span className="project-count">{p.entry_count}</span>
                 </NavLink>
               </li>
@@ -103,8 +114,8 @@ export default function Sidebar() {
         </div>
 
         <div className="sidebar-foot">
-          <a className="nav-link" href="/api/export" download>
-            <Download size={16} /> Exporter tout le cahier
+          <a className="nav-link" href="/api/export" download title="Vos projets, ceux où vous êtes membre, et ce qui est commun au labo (séquences, stockage, modèles)">
+            <Download size={16} /> Exporter mon cahier
           </a>
           <div className="sidebar-user">
             <span>{user.display_name}</span>

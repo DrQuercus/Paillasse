@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { Router } from 'express';
 import { ZipArchive } from 'archiver';
 import { query } from '../db.js';
+import { visibleProjectIds } from '../lib/access.js';
 import { renderEntryPage } from '../lib/render.js';
 import { blobPath } from '../lib/storage.js';
 import { toGenbank } from '../lib/seq/genbank.js';
@@ -16,8 +17,11 @@ const slug = (s) =>
 const README = `Export Paillasse
 ================
 
-data.json      Toutes les données : projets, modèles, entrées, versions figées
+data.json      Les données : projets, modèles, entrées, versions figées
                (avec leurs empreintes SHA-256 chaînées) et pièces jointes.
+               Export personnel : vos projets et ceux où vous avez accepté une invitation,
+               plus ce qui appartient à tout le labo (champ scope = "visible").
+               Export complet depuis la page Maintenance : tout (scope = "all").
 entries/       Chaque entrée en HTML autonome, lisible dans n'importe quel navigateur.
                Une entrée verrouillée est rendue depuis sa version de verrouillage.
 files/         Les pièces jointes, nommées <id>_<nom d'origine>.
@@ -46,10 +50,14 @@ export function storageCsv(units, samples) {
   return `\uFEFF${[head, ...rows].map((r) => r.map(cell).join(';')).join('\r\n')}\r\n`;
 }
 
-// Export complet : ne dépend pas de l'application pour être relu
+// Export : ne dépend pas de l'application pour être relu. Chacun exporte ce qu'il voit (ses projets, ceux où il
+// est membre, ce qui est au labo) ; un administrateur peut tout exporter (?all=1, depuis la page Maintenance).
 router.get('/', async (req, res) => {
-  const [projects, templates, entries, versions, attachments, users, boardNotes, boardLinks, boardImages,
-    sequences, sequenceVersions, sequenceFiles, storageUnits, samples, sampleEvents] = await Promise.all([
+  const all = Boolean(req.user.is_admin) && req.query.all === '1';
+  const visible = all ? null : await visibleProjectIds(req.user.id);
+  const inProject = (id) => !visible || visible.has(id);
+  const [allProjects, templates, allEntries, allVersions, allAttachments, users, allNotes, allLinks, allImages,
+    allSequences, allSequenceVersions, allSequenceFiles, storageUnits, samples, sampleEvents, allMembers] = await Promise.all([
     query(`SELECT id, name, description, color, archived, created_by, created_at, updated_at
            FROM projects ORDER BY created_at`),
     query('SELECT * FROM templates ORDER BY created_at'),
@@ -69,7 +77,22 @@ router.get('/', async (req, res) => {
     query('SELECT * FROM storage_units ORDER BY created_at'),
     query('SELECT * FROM samples ORDER BY code'),
     query('SELECT * FROM sample_events ORDER BY sample_id, created_at'),
+    query('SELECT project_id, user_id, status, invited_by, invited_at, responded_at FROM project_members ORDER BY project_id, invited_at'),
   ]).then((results) => results.map((r) => r.rows));
+
+  const projects = allProjects.filter((p) => inProject(p.id));
+  const entries = allEntries.filter((e) => inProject(e.project_id));
+  const entryIds = new Set(entries.map((e) => e.id));
+  const versions = allVersions.filter((v) => entryIds.has(v.entry_id));
+  const attachments = allAttachments.filter((a) => entryIds.has(a.entry_id));
+  const boardNotes = allNotes.filter((n) => inProject(n.project_id));
+  const boardLinks = allLinks.filter((l) => inProject(l.project_id));
+  const boardImages = allImages.filter((i) => inProject(i.project_id));
+  const sequences = allSequences.filter((q) => !q.project_id || inProject(q.project_id));
+  const sequenceIds = new Set(sequences.map((q) => q.id));
+  const sequenceVersions = allSequenceVersions.filter((v) => sequenceIds.has(v.sequence_id));
+  const sequenceFiles = allSequenceFiles.filter((f) => sequenceIds.has(f.sequence_id));
+  const members = allMembers.filter((m) => inProject(m.project_id));
 
   const fileNames = new Map(attachments.map((a) => [a.id, `${a.id}_${a.filename.replace(/[/\\]/g, '_')}`]));
   const rewriteUrl = (url) => {
@@ -82,7 +105,7 @@ router.get('/', async (req, res) => {
   for (const v of versions) lastVersion.set(v.entry_id, v);
 
   const stamp = new Date().toISOString().slice(0, 10);
-  res.attachment(`paillasse-export-${stamp}.zip`);
+  res.attachment(`paillasse-export-${all ? 'complet-' : ''}${stamp}.zip`);
   const archive = new ZipArchive({ zlib: { level: 6 } });
   archive.on('warning', (err) => console.warn('Export :', err.message));
   archive.on('error', (err) => {
@@ -94,7 +117,8 @@ router.get('/', async (req, res) => {
   archive.append(README, { name: 'LISEZMOI.txt' });
   archive.append(
     JSON.stringify({
-      exported_at: new Date().toISOString(), format: 'paillasse/1', users, projects, templates, entries, versions, attachments,
+      exported_at: new Date().toISOString(), format: 'paillasse/1', scope: all ? 'all' : 'visible', exported_by: req.user.username,
+      users, projects, project_members: members, templates, entries, versions, attachments,
       boards: { notes: boardNotes, links: boardLinks, images: boardImages },
       sequences: { format: 'paillasse-seq/1', working_copies: sequences, versions: sequenceVersions, original_files: sequenceFiles },
       storage: { units: storageUnits, samples, events: sampleEvents },

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Download, GitCommitVertical, Menu, PanelRightClose, PanelRightOpen, RotateCcw, X } from 'lucide-react';
+import { ArrowLeft, Download, Eye, GitCommitVertical, Menu, PanelRightClose, PanelRightOpen, RotateCcw, X } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import { formatDateTime } from '../lib/format.js';
@@ -67,6 +67,9 @@ export default function SequencePage({ id }) {
     return () => document.body.classList.remove('seq-focus');
   }, [focus]);
   const shown = viewing ? pick(viewing) : data;
+  // Séquence d'un projet dont l'administrateur n'est pas membre : il la lit, ne la modifie pas
+  const adminView = meta?.role === 'admin';
+  const readOnly = Boolean(viewing) || adminView;
 
   const setView = (next) => {
     const reload = next.primerBases !== viewRef.current.primerBases; // change les données envoyées à OVE
@@ -86,7 +89,7 @@ export default function SequencePage({ id }) {
     const content = version ? { ...pick(version), name: version.name } : { ...s.data, name: s.name };
     s.baseline = null;
     setSelection(null);
-    send({ type: 'load', sequenceData: toOve(content, { primerBases: viewRef.current.primerBases }), readOnly: Boolean(version), view: viewRef.current });
+    send({ type: 'load', sequenceData: toOve(content, { primerBases: viewRef.current.primerBases }), readOnly: Boolean(version) || s.readOnly, view: viewRef.current });
     send({ type: 'request' }); // état initial vu par l'éditeur : référence des couleurs par défaut
   }
 
@@ -96,7 +99,7 @@ export default function SequencePage({ id }) {
         setMeta(s);
         setName(s.name);
         setData(pick(s));
-        Object.assign(st.current, { data: pick(s), revision: s.revision, name: s.name });
+        Object.assign(st.current, { data: pick(s), revision: s.revision, name: s.name, readOnly: s.role === 'admin', blocked: s.role === 'admin' });
         pushToEditor();
       })
       .catch((err) => setError(err.message));
@@ -211,7 +214,7 @@ export default function SequencePage({ id }) {
 
   // --- Versions ----------------------------------------------------------------------
   const freeze = async (note = '') => {
-    if (viewingRef.current) return;
+    if (viewingRef.current || st.current.readOnly) return;
     setBusy(true);
     try {
       await ensureSaved();
@@ -367,7 +370,7 @@ export default function SequencePage({ id }) {
         <input
           className="seq-name"
           value={name}
-          readOnly={Boolean(viewing)}
+          readOnly={readOnly}
           onChange={(e) => {
             setName(e.target.value);
             st.current.name = e.target.value;
@@ -375,11 +378,12 @@ export default function SequencePage({ id }) {
           }}
           aria-label="Nom de la séquence"
         />
-        {!viewing && <span className={`save-state save-${saveState}`} aria-live="polite">{SAVE_LABELS[saveState]}</span>}
+        {!readOnly && <span className={`save-state save-${saveState}`} aria-live="polite">{SAVE_LABELS[saveState]}</span>}
+        {adminView && <span className="readonly-badge" title="Séquence d’un projet dont vous n’êtes pas membre : accès administrateur, en lecture seule"><Eye size={13} aria-hidden="true" /> Lecture seule</span>}
         <div className="head-actions">
           <button type="button" className="btn btn-ghost" onClick={() => exportAs('genbank')} title="Exporter en GenBank (lisible par SnapGene, Benchling…)"><Download size={15} /> GenBank</button>
           <button type="button" className="btn btn-ghost" onClick={() => exportAs('fasta')}><Download size={15} /> FASTA</button>
-          {!viewing && (
+          {!readOnly && (
             <button type="button" className="btn btn-primary" onClick={() => freeze()} disabled={busy} title="Figer une version (Ctrl+S)">
               <GitCommitVertical size={15} /> Figer une version
             </button>
@@ -394,7 +398,7 @@ export default function SequencePage({ id }) {
         view={view}
         setView={setView}
         hasSelection={Boolean(selection)}
-        readOnly={Boolean(viewing)}
+        readOnly={readOnly}
         onAddFeature={() => setAdding('feature')}
         onAddPrimer={() => setAdding('primer')}
         onCopy={copySelection}
@@ -419,7 +423,7 @@ export default function SequencePage({ id }) {
             tab={tab}
             setTab={setTab}
             data={shown}
-            readOnly={Boolean(viewing)}
+            readOnly={readOnly}
             sequenceId={id}
             version={viewing?.version_number}
             revision={meta?.revision}

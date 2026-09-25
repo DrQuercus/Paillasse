@@ -1,5 +1,6 @@
 // Stockage des échantillons : appareils, étagères, racks, boîtes et tubes (voir migrations/010_storage.sql).
 import { Router } from 'express';
+import { assertEntry, assertProject, assertSequence, visibleProjectIds } from '../lib/access.js';
 import { query, tx } from '../db.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import {
@@ -25,18 +26,26 @@ async function loadUnits(db) {
 }
 
 const SAMPLE_SELECT = `
-  SELECT s.*, o.display_name AS owner_name, q.code AS sequence_code, q.name AS sequence_name,
-         e.title AS entry_title, p.name AS project_name
+  SELECT s.*, o.display_name AS owner_name, q.code AS sequence_code, q.name AS sequence_name, q.project_id AS sequence_project_id,
+         e.title AS entry_title, e.project_id AS entry_project_id, p.name AS project_name
   FROM samples s
   LEFT JOIN users o ON o.id = s.owner_id
   LEFT JOIN sequences q ON q.id = s.sequence_id
   LEFT JOIN entries e ON e.id = s.entry_id
   LEFT JOIN projects p ON p.id = s.project_id`;
 
-const withLocation = (byId) => (s) => {
+// Le stockage est commun au labo ; seuls le titre d'une entrée, le nom d'une séquence et le nom d'un projet
+// privés sont masqués
+const withLocation = (byId, visible = null) => (s) => {
   const path = s.unit_id ? unitPath(byId, s.unit_id) : [];
+  const privateEntry = visible && s.entry_id && !visible.has(s.entry_project_id);
+  const privateSequence = visible && s.sequence_id && s.sequence_project_id && !visible.has(s.sequence_project_id);
+  const privateProject = visible && s.project_id && !visible.has(s.project_id);
   return {
     ...s,
+    ...(privateEntry ? { entry_title: 'entrée d’un projet privé', entry_private: true } : {}),
+    ...(privateSequence ? { sequence_name: 'séquence d’un projet privé', sequence_private: true } : {}),
+    ...(privateProject ? { project_name: 'projet privé', project_private: true } : {}),
     position: positionLabel(path.at(-1), s.row, s.col),
     location: locationText(path, s.row, s.col),
     path: path.map((u) => ({ id: u.id, kind: u.kind, name: u.name, temperature: u.temperature, slot: u.slot, format: u.format })),
@@ -97,7 +106,7 @@ router.get('/units/:id', async (req, res) => {
   let samples = [];
   if (UNIT_KINDS[unit.kind].holdsSamples) {
     const { rows } = await query(`${SAMPLE_SELECT} WHERE s.unit_id = $1 AND NOT s.archived ORDER BY s.row NULLS LAST, s.col, s.created_at`, [unit.id]);
-    samples = rows.map(withLocation(byId));
+    samples = rows.map(withLocation(byId, await visibleProjectIds(req.user.id)));
   }
   res.json({ unit, path: unitPath(byId, unit.id), samples });
 });
@@ -241,7 +250,8 @@ router.get('/units/:id/print', async (req, res) => {
   const { byId } = await loadUnits({ query });
   const unit = byId.get(req.params.id);
   if (!unit || !UNIT_KINDS[unit.kind].holdsSamples) throw notFound('Boîte');
-  const { rows: samples } = await query(`${SAMPLE_SELECT} WHERE s.unit_id = $1 AND NOT s.archived ORDER BY s.row NULLS LAST, s.col`, [unit.id]);
+  const { rows } = await query(`${SAMPLE_SELECT} WHERE s.unit_id = $1 AND NOT s.archived ORDER BY s.row NULLS LAST, s.col`, [unit.id]);
+  const samples = rows.map(withLocation(byId, await visibleProjectIds(req.user.id)));
   res.type('html').send(renderBoxSheet(unit, unitPath(byId, unit.id), samples));
 });
 
@@ -301,7 +311,7 @@ router.get('/samples', async (req, res) => {
     [...params, escaped],
   );
   const { byId } = await loadUnits({ query });
-  res.json(rows.map(withLocation(byId)));
+  res.json(rows.map(withLocation(byId, await visibleProjectIds(req.user.id))));
 });
 
 router.get('/samples/:id', async (req, res) => {
@@ -313,7 +323,7 @@ router.get('/samples/:id', async (req, res) => {
      LEFT JOIN users u ON u.id = ev.created_by WHERE ev.sample_id = $1 ORDER BY ev.created_at DESC, ev.id`,
     [s.id],
   );
-  res.json({ ...withLocation(byId)(s), events });
+  res.json({ ...withLocation(byId, await visibleProjectIds(req.user.id))(s), events });
 });
 
 /**
@@ -323,6 +333,10 @@ router.get('/samples/:id', async (req, res) => {
  */
 router.post('/samples', async (req, res) => {
   const b = req.body ?? {};
+  for (const raw of Array.isArray(b.items) ? b.items.slice(0, 500) : [b.sample]) {
+    const { fields } = cleanSample(raw);
+    if (fields) await checkLinks(req.user, fields);
+  }
   const created = await tx(async (db) => {
     const { byId } = await loadUnits(db);
     const unit = byId.get(b.unit_id);
@@ -377,6 +391,13 @@ router.post('/samples', async (req, res) => {
   res.status(201).json(created);
 });
 
+/** On ne rattache un tube qu'à ce que l'on peut voir. */
+async function checkLinks(user, f, cur = {}) {
+  if (f.project_id && f.project_id !== cur.project_id) await assertProject(user, f.project_id);
+  if (f.sequence_id && f.sequence_id !== cur.sequence_id) await assertSequence(user, f.sequence_id);
+  if (f.entry_id && f.entry_id !== cur.entry_id) await assertEntry(user, f.entry_id);
+}
+
 const FIELD_LABELS = {
   name: 'nom', type: 'type', cap_color: 'couleur du bouchon', concentration: 'concentration', volume: 'volume', aliquot: 'aliquot',
   frozen_on: 'date de congélation', expires_on: 'péremption', thaw_count: 'décongélations', owner_id: 'propriétaire',
@@ -394,6 +415,7 @@ router.put('/samples/:id', async (req, res) => {
   const updated = await tx(async (db) => {
     const { rows: [cur] } = await db.query('SELECT * FROM samples WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!cur) throw notFound('Échantillon');
+    await checkLinks(req.user, fields, cur);
     const changed = Object.keys(fields).filter((k) => !same(fields[k], cur[k]));
     if (!changed.length) return cur;
     const sets = changed.map((k, i) => `${k} = $${i + 2}`).join(', ');
@@ -505,11 +527,12 @@ router.post('/samples/action', async (req, res) => {
 
 // --- À surveiller et activité récente ---------------------------------------------------------------
 
-router.get('/watch', async (_req, res) => {
+router.get('/watch', async (req, res) => {
   const { byId } = await loadUnits({ query });
+  const visible = await visibleProjectIds(req.user.id);
   const pick = async (where, order, params = []) => {
     const { rows } = await query(`${SAMPLE_SELECT} WHERE NOT s.archived AND ${where} ORDER BY ${order} LIMIT 30`, params);
-    return rows.map(withLocation(byId));
+    return rows.map(withLocation(byId, visible));
   };
   const [out, expired, expiring, thawed] = await Promise.all([
     pick(`s.status = 'out' AND s.type <> 'grid' AND s.out_since < now() - make_interval(hours => ${OUT_TOO_LONG_HOURS})`, 's.out_since'),

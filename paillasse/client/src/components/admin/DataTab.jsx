@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Trash2 } from 'lucide-react';
+import { Crown, Download, Lock, Search, Trash2, UserMinus, Users } from 'lucide-react';
 import { api } from '../../api.js';
 import { useApp } from '../../context.js';
 import { Segmented } from '../calc/fields.jsx';
+import Modal from '../Modal.jsx';
 import PurgeDialog from './PurgeDialog.jsx';
 import { Card, formatDate } from './common.jsx';
 
@@ -103,8 +104,63 @@ function EntriesSection() {
   );
 }
 
+const MEMBER_STATUS = { owner: 'Propriétaire', accepted: 'Membre', pending: 'Invitation en attente', declined: 'A refusé' };
+
+/** Partage d'un projet vu par l'administrateur : le confier à un membre, retirer quelqu'un. */
+function ProjectAccessDialog({ project, onClose, onChanged }) {
+  const { notify } = useApp();
+  const [members, setMembers] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.get(`/admin/data/projects/${project.id}/members`).then(setMembers).catch((err) => notify(err.message, 'error')); }, [project.id, notify]);
+  const act = async (fn, message) => {
+    setBusy(true);
+    try {
+      setMembers(await fn());
+      onChanged();
+      notify(message, 'success');
+    } catch (err) {
+      notify(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const handOver = (m) => {
+    if (!window.confirm(`Confier « ${project.name} » à ${m.display_name} ? Il en devient le propriétaire (partage, nom, archivage) ; l’ancien propriétaire reste membre.`)) return;
+    act(() => api.post(`/admin/data/projects/${project.id}/owner`, { user_id: m.id }), `${m.display_name} est maintenant propriétaire du projet.`);
+  };
+  const remove = (m) => {
+    if (m.status === 'accepted' && !window.confirm(`Retirer ${m.display_name} du projet « ${project.name} » ? Ses entrées y restent ; il ne verra plus le projet.`)) return;
+    act(() => api.del(`/admin/data/projects/${project.id}/members/${m.id}`), m.status === 'pending' ? 'Invitation annulée.' : `${m.display_name} retiré du projet.`);
+  };
+  return (
+    <Modal title={`Accès — ${project.name}`} onClose={onClose} footer={<button type="button" className="btn" onClick={onClose}>Fermer</button>}>
+      <p className="small muted">Qui voit ce projet. Vous pouvez le confier à un membre qui a accepté d’y être (propriétaire parti, par exemple) ou retirer quelqu’un. Les invitations, elles, restent du ressort du propriétaire. Chaque geste est noté dans le journal d’administration.</p>
+      {!members && <p className="muted">Chargement…</p>}
+      {members && (
+        <ul className="share-list">
+          {members.map((m) => (
+            <li key={m.id} className="share-row">
+              <span className="people-name">{m.display_name}<span className="muted small"> · {m.username}</span></span>
+              <span className={`share-status share-${m.status === 'accepted' ? 'member' : m.status}`}>{MEMBER_STATUS[m.status]}</span>
+              {m.status !== 'owner' && (
+                <span className="share-actions">
+                  {m.status === 'accepted' && (
+                    <button type="button" className="btn btn-small" onClick={() => handOver(m)} disabled={busy}><Crown size={14} /> Confier le projet</button>
+                  )}
+                  <button type="button" className="icon-btn" onClick={() => remove(m)} disabled={busy} title={m.status === 'accepted' ? 'Retirer du projet' : 'Effacer l’invitation'} aria-label={`Retirer ${m.display_name}`}><UserMinus size={15} /></button>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
 function ProjectsSection() {
   const [rows, setRows] = useState(null);
+  const [access, setAccess] = useState(null);
   const load = useCallback(() => api.get('/admin/data/projects').then(setRows), []);
   useEffect(() => { load(); }, [load]);
   if (!rows) return <p className="muted">Chargement…</p>;
@@ -117,7 +173,14 @@ function ProjectsSection() {
         onDeleted={load}
         columns={[
           ['Projet', (p) => <span className="adm-project"><span className="project-dot" style={{ background: p.color }} /><Link to={`/projects/${p.id}`}>{p.name}</Link>{p.archived && <span className="muted small"> · archivé</span>}</span>],
-          ['Créé par', (p) => p.owner],
+          ['Propriétaire', (p) => p.owner],
+          ['Accès', (p) => (
+            <button type="button" className={`access-chip${p.members.length ? ' is-shared' : ''}`} onClick={() => setAccess(p)} title="Voir et gérer qui a accès">
+              {p.members.length ? <Users size={13} aria-hidden="true" /> : <Lock size={13} aria-hidden="true" />}
+              {p.members.length ? ` Partagé : ${p.members.join(', ')}` : ' Privé'}
+              {p.pending > 0 && ` · ${p.pending} en attente`}
+            </button>
+          )],
           ['Entrées', (p) => `${p.entries}${p.locked ? ` (${p.locked} verr.)` : ''}`, 'num'],
           ['Séquences', (p) => p.sequences, 'num'],
           ['Jeux de données', (p) => p.datasets, 'num'],
@@ -125,6 +188,7 @@ function ProjectsSection() {
         ]}
       />
       <p className="hint">Un projet part avec ses entrées, son tableau d’idées et ses jeux de données. Ses séquences et ses tubes restent dans le registre et le stockage, détachés du projet.</p>
+      {access && <ProjectAccessDialog project={access} onClose={() => setAccess(null)} onChanged={load} />}
     </>
   );
 }
@@ -225,8 +289,12 @@ export default function DataTab() {
   const Section = { entries: EntriesSection, projects: ProjectsSection, sequences: SequencesSection, storage: StorageSection, other: OtherSection }[section];
   return (
     <div className="adm-stack">
-      <Card title="Supprimer des données">
-        <p className="small muted">Suppression définitive, réservée aux administrateurs. Chaque suppression montre d’abord ce qui part et ce qui reste, prend une copie de sécurité de la base (pour revenir en arrière) et s’inscrit dans le journal d’administration. Pour simplement ranger, préférez « archiver » dans le cahier.</p>
+      <Card
+        title="Toutes les données"
+        actions={<a className="btn btn-small" href="/api/export?all=1" download><Download size={14} /> Export complet</a>}
+      >
+        <p className="small muted">Tout le cahier, projets privés compris : vous seul, administrateur, le voyez ici. Ouvrir un élément d’un projet dont vous n’êtes pas membre l’affiche en lecture seule. L’export complet contient tous les projets ; celui de la barre latérale, seulement les vôtres.</p>
+        <p className="small muted">Suppression définitive : chaque suppression montre d’abord ce qui part et ce qui reste, prend une copie de sécurité de la base (pour revenir en arrière) et s’inscrit dans le journal d’administration. Pour simplement ranger, préférez « archiver » dans le cahier.</p>
         <Segmented label="Quelles données" value={section} onChange={setSection} options={SECTIONS} />
         <Section />
       </Card>

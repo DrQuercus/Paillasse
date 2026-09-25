@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { EMPTY_DOC, isDoc } from '../lib/doc.js';
+import { assertEntry } from '../lib/access.js';
 import {
   isModified, libraryTemplate, templateHash, templateOutline, templateTools,
 } from '../lib/templates.js';
@@ -50,6 +51,7 @@ router.post('/', async (req, res) => {
   let category = cleanCategory(b.category);
   let content = EMPTY_DOC;
   if (b.from_entry_id) {
+    await assertEntry(req.user, b.from_entry_id);
     const { rows } = await query('SELECT content FROM entries WHERE id = $1', [b.from_entry_id]);
     if (!rows[0]) throw notFound('Entrée');
     content = rows[0].content;
