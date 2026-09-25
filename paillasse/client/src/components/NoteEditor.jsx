@@ -7,6 +7,7 @@ import { IMAGE_SIZES, buildExtensions } from './extensions.js';
 import Toolbar from './Toolbar.jsx';
 import ImageEditor from './ImageEditor.jsx';
 import { SequencePicker } from './SequenceRef.jsx';
+import { newSlot } from './TemplateSlot.jsx';
 
 // Calculateurs et atelier Gels : chargés à la première ouverture
 const CalcDialog = lazy(() => import('./calc/CalcDialog.jsx'));
@@ -41,16 +42,47 @@ function insertBlock(editor, node) {
   placeCursorBelow(editor);
 }
 
-/** Insère une pièce jointe : image affichée dans le texte, autre fichier sous forme de lien. */
-function insertAttachment(editor, att, pos) {
-  if (!editor || editor.isDestroyed) return;
+/** Pièce jointe dans le texte : image affichée, autre fichier sous forme de lien. */
+function attachmentNode(att) {
   const url = fileUrl(att.id);
-  const node = DISPLAYABLE.test(att.mime_type)
+  return DISPLAYABLE.test(att.mime_type)
     ? { type: 'image', attrs: { src: url, alt: att.filename } }
     : { type: 'paragraph', content: [{ type: 'text', text: `📎 ${att.filename}`, marks: [{ type: 'link', attrs: { href: url } }] }] };
+}
+
+function insertAttachment(editor, att, pos) {
+  if (!editor || editor.isDestroyed) return;
+  const node = attachmentNode(att);
   const chain = editor.chain().focus();
   (pos == null ? chain.insertContent(node) : chain.insertContentAt(pos, node)).run();
   placeCursorBelow(editor);
+}
+
+/** Position actuelle d'un emplacement de modèle ({ id, pos } au moment du clic), retrouvé par son id s'il a bougé. */
+function slotRange(editor, slot) {
+  const { doc } = editor.state;
+  const at = slot.pos != null && slot.pos < doc.content.size ? doc.nodeAt(slot.pos) : null;
+  if (at?.type.name === 'templateSlot' && at.attrs.id === slot.id) return { from: slot.pos, to: slot.pos + at.nodeSize };
+  let found = null;
+  doc.descendants((n, pos) => {
+    if (found) return false;
+    if (n.type.name === 'templateSlot' && n.attrs.id === slot.id) { found = { from: pos, to: pos + n.nodeSize }; return false; }
+    return true;
+  });
+  return found;
+}
+
+/** Remplace l'emplacement par le bloc produit (figure, graphique, calcul…) ; faux s'il a disparu entre-temps. */
+function replaceSlot(editor, slot, node) {
+  if (!slot || !editor || editor.isDestroyed) return false;
+  const range = slotRange(editor, slot);
+  if (!range) return false;
+  editor.chain().focus().insertContentAt(range, node).run();
+  // Curseur sous le bloc inséré : la frappe suivante ne doit pas le remplacer
+  const inserted = editor.state.doc.nodeAt(range.from);
+  const end = range.from + (inserted?.nodeSize ?? 0);
+  if (editor.state.doc.resolve(end).nodeAfter?.isTextblock) editor.commands.setTextSelection(end + 1);
+  return true;
 }
 
 /** Petite barre flottante au-dessus d'une image sélectionnée. */
@@ -82,7 +114,7 @@ function ImageMenu({ editor, onEdit, onAnalyse }) {
   );
 }
 
-export default function NoteEditor({ content, editable = true, onChange, onUpload, onReady, placeholder, entryId }) {
+export default function NoteEditor({ content, editable = true, onChange, onUpload, onReady, placeholder, entryId, templateMode = false }) {
   const onChangeRef = useRef(onChange);
   const onUploadRef = useRef(onUpload);
   onChangeRef.current = onChange;
@@ -90,18 +122,23 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
   const editorRef = useRef(null);
   const [uploading, setUploading] = useState(0);
   const [imageEdit, setImageEdit] = useState(null); // { pos, src }
-  const [pickingSequence, setPickingSequence] = useState(false);
-  const [insertingCalc, setInsertingCalc] = useState(false);
-  const [gelSession, setGelSession] = useState(null); // { attrs?, apply?, attachmentId?, filename?, insertAt? }
-  const [statSession, setStatSession] = useState(null); // { attrs?, apply?, table? }
+  // Les sessions portent éventuellement l'emplacement de modèle qu'elles rempliront : slot = { id, pos }
+  const [pickingSequence, setPickingSequence] = useState(null); // { slot? }
+  const [insertingCalc, setInsertingCalc] = useState(null); // { preset?, slot? }
+  const [gelSession, setGelSession] = useState(null); // { attrs?, apply?, attachmentId?, filename?, insertAt?, mode?, slot? }
+  const [statSession, setStatSession] = useState(null); // { attrs?, apply?, table?, dataset?, slot? }
+  const slotFileInput = useRef(null);
+  const slotForFiles = useRef(null);
 
-  const handleFiles = async (files, pos) => {
+  const handleFiles = async (files, pos, slot = null) => {
     let at = pos;
+    let target = slot;
     for (const file of files) {
       setUploading((n) => n + 1);
       try {
         const att = await onUploadRef.current(file);
-        insertAttachment(editorRef.current, att, at);
+        if (!(target && replaceSlot(editorRef.current, target, attachmentNode(att)))) insertAttachment(editorRef.current, att, at);
+        target = null;
         at = undefined; // les suivants s'insèrent à la suite
       } catch {
         /* l'erreur est signalée par le parent */
@@ -173,6 +210,18 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
     if (!editor?.storage.gelFigure) return;
     editor.storage.gelFigure.edit = canUploadNow ? (attrs, apply) => setGelSession({ attrs, apply }) : null;
     if (editor.storage.statFigure) editor.storage.statFigure.edit = canUploadNow ? (attrs, apply) => setStatSession({ attrs, apply }) : null;
+    // Emplacements des modèles : remplis dans une entrée (pièces jointes possibles), dessinés dans un modèle
+    if (editor.storage.templateSlot) {
+      editor.storage.templateSlot.fill = canUploadNow ? (attrs, pos) => {
+        const slot = { id: attrs.id, pos };
+        if (attrs.tool === 'gel') setGelSession({ mode: attrs.preset?.mode, slot });
+        else if (attrs.tool === 'stats') setStatSession({ dataset: attrs.preset?.dataset, slot });
+        else if (attrs.tool === 'calc') setInsertingCalc({ preset: attrs.preset, slot });
+        else if (attrs.tool === 'sequence') setPickingSequence({ slot });
+        else { slotForFiles.current = slot; slotFileInput.current?.click(); }
+      } : null;
+      if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta('templateSlotMode', canUploadNow));
+    }
   }, [editor, canUploadNow]);
 
   // Tableau sous le curseur : proposé comme données du graphique
@@ -242,12 +291,25 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
           canUpload={canUpload}
           onPickFiles={(files) => handleFiles(files)}
           uploading={uploading}
-          onInsertSequence={canUpload ? () => setPickingSequence(true) : undefined}
-          onInsertCalc={() => setInsertingCalc(true)}
+          onInsertSequence={canUpload ? () => setPickingSequence({}) : undefined}
+          onInsertCalc={() => setInsertingCalc({})}
           onInsertGel={canUpload ? () => setGelSession({}) : undefined}
           onInsertStats={canUpload ? () => setStatSession({ table: tableAtCursor() }) : undefined}
+          onInsertSlot={templateMode ? (tool) => insertBlock(editor, newSlot(tool)) : undefined}
         />
       )}
+      <input
+        ref={slotFileInput}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = [...e.target.files];
+          e.target.value = '';
+          if (files.length) handleFiles(files, undefined, slotForFiles.current);
+          slotForFiles.current = null;
+        }}
+      />
       {editor && editable && canUpload && (
         <BubbleMenu
           editor={editor}
@@ -262,20 +324,23 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
       <EditorContent editor={editor} onClick={onClick} />
       {pickingSequence && (
         <SequencePicker
-          onClose={() => setPickingSequence(false)}
+          onClose={() => setPickingSequence(null)}
           onPick={(attrs) => {
-            setPickingSequence(false);
-            insertBlock(editor, { type: 'sequenceRef', attrs });
+            const node = { type: 'sequenceRef', attrs };
+            if (!replaceSlot(editor, pickingSequence.slot, node)) insertBlock(editor, node);
+            setPickingSequence(null);
           }}
         />
       )}
       {insertingCalc && (
         <Suspense fallback={null}>
           <CalcDialog
-            onClose={() => setInsertingCalc(false)}
+            preset={insertingCalc.preset}
+            onClose={() => setInsertingCalc(null)}
             onApply={(attrs) => {
-              setInsertingCalc(false);
-              insertBlock(editor, { type: 'labCalc', attrs });
+              const node = { type: 'labCalc', attrs };
+              if (!replaceSlot(editor, insertingCalc.slot, node)) insertBlock(editor, node);
+              setInsertingCalc(null);
             }}
           />
         </Suspense>
@@ -290,6 +355,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
             onUpdate={(attrs) => gelSession.apply?.(attrs)}
             onInsert={(attrs) => {
               const node = { type: 'gelFigure', attrs };
+              if (replaceSlot(editor, gelSession.slot, node)) return;
               if (gelSession.insertAt !== undefined) {
                 editor.chain().focus().insertContentAt(gelSession.insertAt, node).run();
                 placeCursorBelow(editor);
@@ -309,6 +375,7 @@ export default function NoteEditor({ content, editable = true, onChange, onUploa
             onUpdate={(attrs) => statSession.apply?.(attrs)}
             onInsert={(attrs) => {
               const node = { type: 'statFigure', attrs };
+              if (replaceSlot(editor, statSession.slot, node)) return;
               if (statSession.table) {
                 // Sous le tableau analysé, et non dedans
                 const { $from } = editor.state.selection;

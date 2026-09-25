@@ -52,7 +52,7 @@ function SourceDialog({ entryId, onChoose, onClose }) {
 /**
  * Session d'analyse ouverte depuis l'éditeur : choix de l'image (nouvelle figure), chargement,
  * atelier en plein écran, puis production de la figure et des pièces jointes.
- * session = { attrs? (modification), attachmentId?, filename? } ; upload(file, derivation) → pièce jointe.
+ * session = { attrs? (modification), attachmentId?, filename?, mode? } ; upload(file, derivation) → pièce jointe.
  */
 export default function GelEditorSession({ session, entryId, upload, onInsert, onUpdate, onClose }) {
   const { notify } = useApp();
@@ -75,7 +75,7 @@ export default function GelEditorSession({ session, entryId, upload, onInsert, o
         if (cancelled) return;
         const initial = session.attrs?.analysis
           ? session.attrs.analysis
-          : { ...newAnalysis(lastMode()), source: { attachmentId: chosen.attachment?.id ?? null, filename, width: info.width, height: info.height, bits: info.bits, format: info.format, lossy: info.lossy } };
+          : { ...newAnalysis(session.mode ?? lastMode()), source: { attachmentId: chosen.attachment?.id ?? null, filename, width: info.width, height: info.height, bits: info.bits, format: info.format, lossy: info.lossy } };
         setLoaded({ source: { image, info }, initial, file: chosen.file ?? null });
       } catch (err) {
         notify(err.message, 'error');

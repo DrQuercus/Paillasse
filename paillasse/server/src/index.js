@@ -7,6 +7,7 @@ import { migrate } from './migrate.js';
 import { ensureFirstUser, parseCookies, requireAuth } from './auth.js';
 import { ensureDataDirs } from './lib/storage.js';
 import { escapeHtml } from './lib/render.js';
+import { installTemplateLibrary } from './lib/templates.js';
 import authRoutes from './routes/auth.js';
 import projectRoutes from './routes/projects.js';
 import entryRoutes from './routes/entries.js';
@@ -92,6 +93,7 @@ app.use((err, req, res, _next) => {
 
 ensureDataDirs();
 await migrate();
+await installTemplateLibrary(pool);
 await ensureFirstUser();
 
 const server = app.listen(config.port, config.host, () => {

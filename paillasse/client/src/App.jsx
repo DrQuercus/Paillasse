@@ -74,7 +74,7 @@ export default function App() {
     projects,
     reloadProjects,
     notify,
-    openNewEntry: (projectId) => setNewEntry({ projectId }),
+    openNewEntry: (projectId, templateId) => setNewEntry({ projectId, templateId }),
   }), [user, projects, reloadProjects, notify]);
 
   // Tableau partagé par lien : accessible sans compte
@@ -107,7 +107,7 @@ export default function App() {
           </Routes>
         </main>
       </div>
-      {newEntry && <NewEntryDialog initialProjectId={newEntry.projectId} onClose={() => setNewEntry(null)} />}
+      {newEntry && <NewEntryDialog initialProjectId={newEntry.projectId} initialTemplateId={newEntry.templateId ?? ''} onClose={() => setNewEntry(null)} />}
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((t) => t.id !== id))} />
     </AppContext.Provider>
   );

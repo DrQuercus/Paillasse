@@ -58,10 +58,10 @@ function StartDialog({ table, onStart, onClose }) {
 /**
  * Session ouverte depuis l'éditeur : point de départ (nouveau graphique) ou encart à modifier,
  * atelier en plein écran, puis graphique joint à l'entrée et encart inséré ou mis à jour.
- * session = { attrs?, apply?, table? } ; upload(file, derivation) → pièce jointe.
+ * session = { attrs?, apply?, table?, dataset? (tableau préparé par un modèle) } ; upload(file, derivation) → pièce jointe.
  */
 export default function StatEditorSession({ session, upload, onInsert, onUpdate, onClose }) {
-  const [initial, setInitial] = useState(session.attrs?.dataset ?? null);
+  const [initial, setInitial] = useState(session.attrs?.dataset ?? session.dataset ?? null);
   if (!initial) return <StartDialog table={session.table} onStart={setInitial} onClose={onClose} />;
   const submit = async ({ ds, res, plot }) => {
     const attrs = await statNodeAttrs({ ds, res, plot, upload, width: session.attrs?.width ?? 75 });

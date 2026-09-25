@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditorState } from '@tiptap/react';
 import {
   Bold, Calculator, ChartColumn, ChevronDown, Code, Columns4, Dna, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListChecks, ListOrdered,
-  Minus, Paperclip, Quote, Redo2, SquareCode, Strikethrough, Subscript, Superscript, Table,
+  Minus, Paperclip, Quote, Redo2, SquareCode, SquareDashed, Strikethrough, Subscript, Superscript, Table,
   Underline, Undo2,
 } from 'lucide-react';
+import { SLOT_TOOLS } from './TemplateSlot.jsx';
 
 const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
@@ -38,8 +39,8 @@ const TABLE_ACTIONS = [
   ['Supprimer le tableau', (c) => c.deleteTable(), true, 'danger'],
 ];
 
-/** Toutes les actions de tableau dans un seul menu : la barre garde la même taille partout. */
-function TableMenu({ editor, inTable }) {
+/** Bouton de la barre qui ouvre un menu déroulant (fermé par un clic ailleurs ou Échap). */
+function MenuButton({ label, active, icon, children }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -59,41 +60,61 @@ function TableMenu({ editor, inTable }) {
     <div className="tool-menu" ref={ref}>
       <button
         type="button"
-        className={`tool tool-wide${inTable ? ' is-active' : ''}`}
+        className={`tool tool-wide${active ? ' is-active' : ''}`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Tableau"
-        title="Tableau"
+        aria-label={label}
+        title={label}
       >
-        <Table size={16} /><ChevronDown size={12} />
+        {icon}<ChevronDown size={12} />
       </button>
-      {open && (
-        <div className="menu" role="menu">
-          {TABLE_ACTIONS.map(([label, action, needsTable, tone]) => (
-            <button
-              key={label}
-              type="button"
-              role="menuitem"
-              className={`menu-item${tone ? ` menu-${tone}` : ''}`}
-              disabled={needsTable !== inTable}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                action(editor.chain().focus()).run();
-                setOpen(false);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open && <div className="menu" role="menu">{children(() => setOpen(false))}</div>}
     </div>
   );
 }
 
-export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc, onInsertGel, onInsertStats }) {
+const MenuItem = ({ onClick, disabled, tone, children }) => (
+  <button
+    type="button"
+    role="menuitem"
+    className={`menu-item${tone ? ` menu-${tone}` : ''}`}
+    disabled={disabled}
+    onMouseDown={(e) => e.preventDefault()}
+    onClick={onClick}
+  >
+    {children}
+  </button>
+);
+
+/** Toutes les actions de tableau dans un seul menu : la barre garde la même taille partout. */
+function TableMenu({ editor, inTable }) {
+  return (
+    <MenuButton label="Tableau" active={inTable} icon={<Table size={16} />}>
+      {(close) => TABLE_ACTIONS.map(([label, action, needsTable, tone]) => (
+        <MenuItem key={label} tone={tone} disabled={needsTable !== inTable} onClick={() => { action(editor.chain().focus()).run(); close(); }}>
+          {label}
+        </MenuItem>
+      ))}
+    </MenuButton>
+  );
+}
+
+/** Modèles : emplacements que l'entrée remplira (figure de gel, graphique, calcul, photo, séquence). */
+function SlotMenu({ onInsertSlot }) {
+  return (
+    <MenuButton label="Emplacement à remplir dans l’entrée (figure de gel, graphique, photo…)" icon={<SquareDashed size={16} />}>
+      {(close) => Object.entries(SLOT_TOOLS).map(([tool, { Icon, name }]) => (
+        <MenuItem key={tool} onClick={() => { onInsertSlot(tool); close(); }}>
+          <Icon size={14} aria-hidden="true" /> {name}
+        </MenuItem>
+      ))}
+    </MenuButton>
+  );
+}
+
+export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onInsertSequence, onInsertCalc, onInsertGel, onInsertStats, onInsertSlot }) {
   const imageInput = useRef(null);
   const fileInput = useRef(null);
 
@@ -181,6 +202,7 @@ export default function Toolbar({ editor, canUpload, onPickFiles, uploading, onI
       <div className="tool-group">
         <TableMenu editor={editor} inTable={s.table} />
         {onInsertCalc && <Btn label="Insérer un calcul (molarité, dilution, tampon…)" onClick={onInsertCalc}><Calculator size={16} /></Btn>}
+        {onInsertSlot && <SlotMenu onInsertSlot={onInsertSlot} />}
       </div>
       {canUpload && (
         <div className="tool-group">

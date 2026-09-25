@@ -144,7 +144,20 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   scellés, imprimés, exportés et trouvés par la recherche. « Modifier » rouvre l'atelier tant que l'entrée est
   un brouillon ; une fois verrouillée, « Reprendre » copie les données dans un nouveau jeu de la page
   Statistiques.
-- **Modèles** de protocoles, créés à la main ou à partir d'une entrée.
+- **Modèles** (menu « Modèles ») : 18 modèles de base installés d'office, rangés par catégorie :
+  *Général* (entrée classique, protocole, réunion, préparation d'un tampon), *Biologie moléculaire* (PCR, clonage,
+  transformation, miniprep, gel d'agarose, RT-qPCR), *Protéines* (expression, purification His-tag / Ni-NTA,
+  SDS-PAGE, western blot, dosage Bradford / BCA, ELISA) et *Cellules* (passage, transfection). Chacun apporte ses
+  sections, ses tableaux à compléter (plan de dépôt, anticorps, fractions, plan de plaque…), ses étapes à cocher
+  pendant la manip, ses calculs déjà prêts (tampons de purification, TBST, master mix Q5 ou SYBR, milieu LB) et des
+  **emplacements à remplir** : un clic ouvre le bon outil, déjà réglé (atelier Gels en mode western ou ADN,
+  graphique avec la gamme de BSA ou la gamme ELISA prête à saisir, calcul de ligation, photo, séquence du registre),
+  et le résultat prend la place de l'emplacement. Les emplacements laissés vides n'apparaissent ni une fois
+  l'entrée verrouillée, ni à l'impression. La nouvelle entrée se choisit dans une galerie (recherche, catégories,
+  double-clic pour créer). Les modèles de base se modifient comme les autres (un modèle adapté par le labo n'est
+  plus jamais écrasé, « Revenir à la version d'origine » le rétablit), se dupliquent, se retirent et se remettent ;
+  on en crée aussi à la main ou à partir d'une entrée, avec ses propres emplacements (bouton « Emplacement à
+  remplir » de la barre d'outils du modèle).
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
 - **Export complet** en un clic : zip avec `data.json`, chaque entrée en HTML autonome et tous les fichiers.
@@ -235,6 +248,8 @@ npm run dev:server
 npm run dev:client
 # tests du serveur et des calculs
 npm test
+# après une modification des modèles de base (client/src/lib/templates/library.js)
+npm --prefix client run templates
 ```
 
 ## Calculs : fiabilité
@@ -339,6 +354,8 @@ server/
   src/lib/calc.js              encart de calcul : vérification, rendu imprimable, texte de recherche
   src/lib/gel.js               encart de figure de gel : vérification, rendu imprimable, texte de recherche
   src/lib/stat.js              encart de graphique statistique : vérification, rendu imprimable, texte de recherche
+  src/lib/templates.js         modèles de base : installation au démarrage, mise à jour s'ils sont intacts
+  src/lib/template-library.json  modèles de base (généré par npm --prefix client run templates)
   src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
                                jeux de données statistiques
   scripts/create-user.js       créer un compte ou changer un mot de passe
@@ -354,6 +371,9 @@ client/
   src/lib/stats/               lois, tests, régressions, ANOVA, contingence, survie, graphiques SVG (testés contre scipy)
   src/components/stats/        atelier (StatWorkbench : tableau, analyse, graphique), encart (StatFigureNode)
   src/pages/StatsPage.jsx      page Statistiques (nouveaux tableaux, jeux de données enregistrés)
+  src/lib/templates/           modèles de base (library.js) et constructeurs de documents
+  src/components/TemplateSlot.jsx  emplacement à remplir (figure de gel, graphique, calcul, photo, séquence)
+  src/pages/TemplatesPage.jsx  galerie des modèles ; TemplateEditPage.jsx : édition
 deploy/                        service systemd, sauvegarde et son timer
 ```
 

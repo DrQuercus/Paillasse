@@ -126,6 +126,7 @@ export function renderDoc(doc, options = {}) {
       case 'labCalc': return renderCalc(a.summary);
       case 'gelFigure': return renderGel(a, opts.rewriteUrl);
       case 'statFigure': return renderStat(a, opts.rewriteUrl);
+      case 'templateSlot': return ''; // emplacement de modèle resté vide : rien à imprimer
       case 'table': return `<table>${children(node)}</table>`;
       case 'tableRow': return `<tr>${children(node)}</tr>`;
       case 'tableHeader': return `<th${cellAttrs(a)}>${children(node)}</th>`;

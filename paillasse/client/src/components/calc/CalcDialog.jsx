@@ -7,12 +7,14 @@ import { lastKind, storeParams, storedParams } from './store.js';
 
 /**
  * Insérer un calcul dans l'éditeur, ou modifier un encart existant (initial = { kind, params }).
+ * preset = { kind, params } : calcul proposé par un emplacement de modèle (insertion).
  * onApply reçoit les attributs du nœud : { kind, params, summary }.
  */
-export default function CalcDialog({ initial = null, onApply, onClose }) {
+export default function CalcDialog({ initial = null, preset = null, onApply, onClose }) {
   const editing = Boolean(initial);
-  const [kind, setKind] = useState(initial?.kind ?? lastKind());
-  const [byKind, setByKind] = useState(() => (initial ? { [initial.kind]: { ...getCalculator(initial.kind)?.defaults(), ...initial.params } } : {}));
+  const start = initial ?? (getCalculator(preset?.kind) ? preset : null);
+  const [kind, setKind] = useState(start?.kind ?? lastKind());
+  const [byKind, setByKind] = useState(() => (start ? { [start.kind]: { ...getCalculator(start.kind)?.defaults(), ...start.params } } : {}));
   const params = byKind[kind] ?? storedParams(kind);
   const result = useMemo(() => runCalculator(kind, params), [kind, params]);
 
