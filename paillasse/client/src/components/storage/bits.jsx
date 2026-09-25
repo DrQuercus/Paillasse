@@ -17,7 +17,10 @@ export const KIND_ICONS = {
 
 // Couleurs de boîtes (carton ou plastique des boîtes de congélation)
 export const BOX_COLORS = ['#CFE3FF', '#FFD9C2', '#FFF1B8', '#CDEFD8', '#E6D9FF', '#FFD6E7', '#E4E7EC', '#C9F0F0'];
-export const boxColor = (u) => u?.color || BOX_COLORS[0];
+// Boîtes à grilles : aluminium anodisé (argent, or, rose, cuivre, bleu, vert, violet) ou plastique rouge
+export const GRIDBOX_COLORS = ['#D5D9DF', '#E6D17E', '#E8B4CC', '#DDA67C', '#9EC5EA', '#A6D7B2', '#BCA8E6', '#E37B84'];
+export const GRIDBOX_COLOR_NAMES = ['argent', 'or', 'rose', 'cuivre', 'bleu', 'vert', 'violet', 'rouge'];
+export const boxColor = (u) => u?.color || (u?.kind === 'gridbox' ? GRIDBOX_COLORS[0] : BOX_COLORS[0]);
 
 export function TypeIcon({ type, size = 14 }) {
   const Icon = TYPE_ICONS[type] ?? Package;

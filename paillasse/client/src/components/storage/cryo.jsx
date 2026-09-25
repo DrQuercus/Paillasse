@@ -2,8 +2,9 @@ import { useId, useState } from 'react';
 import { Pencil, Plus } from 'lucide-react';
 import { api } from '../../api.js';
 import { useApp } from '../../context.js';
+import { clipEars, gridboxLayout } from '../../lib/gridbox.js';
 import {
-  GRIDBOX_FORMATS, GRID_SCREENING, contentsText, decodeCell, formatTemp, unitLabel,
+  GRIDBOX_FORMATS, GRID_SCREENING, contentsText, decodeCell, formatTemp, positionLabel, unitLabel,
 } from '../../lib/inventory.js';
 import { Cap, boxColor } from './bits.jsx';
 
@@ -64,34 +65,92 @@ export function SampleIcon({ sample, size = 16 }) {
   return sample?.type === 'grid' ? <span className="sample-icon-grid"><GridDisc sample={sample} size={size} /></span> : <Cap sample={sample} size={size} />;
 }
 
-/** Position de chaque grille dans une boîte ronde (en % du diamètre), et sa taille. */
-export function gridboxSpots(format) {
-  const ring = (n, radius, start, size, extra = {}, inward = false) => Array.from({ length: n }, (_, i) => {
-    const a = ((start + (i * 360) / n) * Math.PI) / 180;
-    // Numéro côté centre quand les grilles se touchent presque (en % de la case de la grille)
-    const lab = inward ? { x: 50 - 72 * Math.cos(a), y: 50 - 72 * Math.sin(a) } : null;
-    return { x: 50 + radius * Math.cos(a), y: 50 + radius * Math.sin(a), size, lab, ...extra };
-  });
-  if (format === 'g12') return ring(12, 36, -90, 17.5, {}, true);
-  if (format === 'g4c4') return [...ring(4, 33, -135, 25, { clipped: true }), ...ring(4, 33, -90, 20.5)];
-  if (format === 'g4c') return ring(4, 27, -90, 32, { clipped: true });
-  return ring(4, 27, -90, 29);
+/** Un logement de la boîte, dans le repère de la boîte (0–100) : rond, losange, ou rond à oreilles (clippée). */
+export function PocketShape({ p, ...props }) {
+  if (p.shape === 'diamond') {
+    const pts = [[p.x, p.y - p.h / 2], [p.x + p.w / 2, p.y], [p.x, p.y + p.h / 2], [p.x - p.w / 2, p.y]];
+    return <polygon points={pts.map((q) => q.join(',')).join(' ')} strokeLinejoin="round" {...props} />;
+  }
+  if (p.shape === 'clip') {
+    return (
+      <g {...props}>
+        <circle cx={p.x} cy={p.y} r={p.w / 2} />
+        {clipEars(p).map((e, i) => <circle key={i} cx={e.x} cy={e.y} r={e.r} />)}
+      </g>
+    );
+  }
+  return <circle cx={p.x} cy={p.y} r={p.w / 2} {...props} />;
 }
 
-/** Petite boîte ronde (dans un puck) : une pastille par position, pleine si une grille y est. */
-export function MiniRoundBox({ box, size = 34 }) {
-  const spots = gridboxSpots(box.format);
-  const map = box.map ?? '';
+/**
+ * Boîte à grilles dessinée (vue de dessus) : corps coloré avec son cran, logements, vis, numéros gravés.
+ * map : mini-carte des positions (petite boîte, sans numéros) ; demo : toutes les positions garnies ;
+ * marks : positions à entourer (choix de places).
+ */
+export function GridboxBody({ format, color, labels = false, inside = false, map = null, demo = false, marks = null, size, className = '' }) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
+  const L = gridboxLayout(format);
+  const P = (c) => positionLabel({ kind: 'gridbox', format }, 0, c);
   return (
-    <svg viewBox="0 0 100 100" width={size} height={size} className="mini-roundbox" aria-hidden="true">
-      <circle cx="50" cy="50" r="48" fill={boxColor(box)} stroke="rgba(29,41,64,.35)" strokeWidth="3" />
-      {spots.map((p, i) => {
-        const cell = decodeCell(map[i]);
-        return <circle key={i} cx={p.x} cy={p.y} r={p.size / 2.4} fill={cell ? (cell.out ? 'none' : '#C9814F') : 'rgba(29,41,64,.18)'} stroke={cell ? '#854A22' : 'none'} strokeWidth="3" strokeDasharray={cell?.out ? '6 4' : undefined} />;
+    <svg viewBox="-1 -1 102 102" width={size} height={size} className={`gbox-body ${className}`} aria-hidden="true">
+      <defs>
+        <mask id={`n${uid}`}>
+          <rect x="-1" y="-1" width="102" height="102" fill="#fff" />
+          <circle cx={L.notch.x} cy={L.notch.y} r={L.notch.r} fill="#000" />
+        </mask>
+        <linearGradient id={`s${uid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity=".6" />
+          <stop offset=".45" stopColor="#fff" stopOpacity="0" />
+          <stop offset="1" stopColor="#000" stopOpacity=".2" />
+        </linearGradient>
+        {/* Ombre intérieure : les logements sont creusés dans la boîte */}
+        <filter id={`i${uid}`} x="-30%" y="-30%" width="160%" height="160%">
+          <feComponentTransfer in="SourceAlpha"><feFuncA type="table" tableValues="1 0" /></feComponentTransfer>
+          <feGaussianBlur stdDeviation=".7" />
+          <feOffset dy=".9" />
+          <feComposite in2="SourceAlpha" operator="in" />
+          <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .55 0" />
+          <feMerge><feMergeNode in="SourceGraphic" /><feMergeNode /></feMerge>
+        </filter>
+      </defs>
+      <g mask={`url(#n${uid})`}>
+        <circle cx="50" cy="50" r="49.5" fill={color} />
+        <circle cx="50" cy="50" r="49.5" fill={`url(#s${uid})`} />
+        <circle cx="50" cy="50" r="48.9" fill="none" stroke="rgba(15,23,42,.22)" strokeWidth="1.2" />
+      </g>
+      <g style={{ fill: `color-mix(in srgb, ${color} 62%, #1E293B)` }} filter={`url(#i${uid})`}>
+        {L.spots.map((p, i) => <PocketShape key={i} p={p} />)}
+      </g>
+      {L.spots.map((p, i) => {
+        const cell = demo ? { out: false } : map ? decodeCell(map[i]) : null;
+        if (!cell) return null;
+        const r = (p.disc * 0.8) / 2;
+        return (
+          <g key={`g${i}`} opacity={cell.out ? 0.45 : 1}>
+            {p.clipped && <circle cx={p.x} cy={p.y} r={r * 1.09} fill="#AEB5BF" stroke="#6B7280" strokeWidth=".8" />}
+            <circle cx={p.x} cy={p.y} r={p.clipped ? r * 0.8 : r} fill="#D48D5B" stroke="#854A22" strokeWidth=".9" strokeDasharray={cell.out ? '2 1.4' : undefined} />
+          </g>
+        );
       })}
-      <circle cx="50" cy="50" r="7" fill="rgba(29,41,64,.3)" />
+      {marks && L.spots.map((p, i) => (marks.includes(i) ? <PocketShape key={`m${i}`} p={p} fill="rgba(36,73,199,.28)" stroke="#2449C7" strokeWidth="1.6" /> : null))}
+      <circle cx="50" cy="50" r={L.screw} fill="#475569" />
+      <circle cx="50" cy="50" r={L.screw * 0.72} fill="none" stroke="#94A3B8" strokeWidth=".7" strokeDasharray="1.4 .9" />
+      <circle cx="50" cy="50" r={L.screw * 0.38} fill="#1E293B" />
+      {L.dots.map((d, i) => <circle key={`d${i}`} cx={d.x} cy={d.y} r="2" fill="rgba(255,255,255,.8)" stroke="rgba(15,23,42,.35)" strokeWidth=".5" />)}
+      {labels && L.spots.map((p, i) => (
+        <text key={`t${i}`} x={p.lab.x} y={p.lab.y} className="gbox-num" textAnchor="middle" dominantBaseline="central">{P(i)}</text>
+      ))}
+      {/* Petite boîte : le numéro dans chaque logement vide */}
+      {inside && L.spots.map((p, i) => (map && decodeCell(map[i]) ? null : (
+        <text key={`t${i}`} x={p.x} y={p.y} className="gbox-num is-inside" textAnchor="middle" dominantBaseline="central">{P(i)}</text>
+      )))}
     </svg>
   );
+}
+
+/** Petite boîte dans un puck : ses logements, garnis là où il y a une grille. */
+export function MiniRoundBox({ box, size = 34 }) {
+  return <GridboxBody format={box.format} color={boxColor(box)} map={box.map ?? ''} size={size} className="mini-roundbox" />;
 }
 
 // --- Glisser un puck (niveau de canister) ou une boîte (case de puck) --------------------------------

@@ -8,8 +8,8 @@ import {
 import Modal from '../Modal.jsx';
 import { Segmented } from '../calc/fields.jsx';
 import ApplianceArt from './ApplianceArt.jsx';
-import { BOX_COLORS, KIND_ICONS, kindLabel } from './bits.jsx';
-import { gridboxSpots } from './cryo.jsx';
+import { BOX_COLORS, GRIDBOX_COLORS, GRIDBOX_COLOR_NAMES, KIND_ICONS, kindLabel } from './bits.jsx';
+import { GridboxBody } from './cryo.jsx';
 
 // Appareils proposés à la création, avec leur réglage d'usine
 export const APPLIANCE_PRESETS = [
@@ -209,13 +209,7 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
               <div className="format-picker" role="radiogroup" aria-label="Type de boîte à grilles">
                 {Object.entries(GRIDBOX_FORMATS).map(([k, f]) => (
                   <button key={k} type="button" role="radio" aria-checked={format === k} className={`format-card${format === k ? ' is-selected' : ''}`} onClick={() => setFormat(k)}>
-                    <svg viewBox="0 0 100 100" width="54" height="54" aria-hidden="true">
-                      <circle cx="50" cy="50" r="47" className="fmt-box" />
-                      {gridboxSpots(k).map((p, i) => (p.clipped ? (
-                        <g key={i}><circle cx={p.x} cy={p.y} r={p.size / 2.2} className="fmt-clip" /><circle cx={p.x} cy={p.y} r={p.size / 3.3} className="fmt-grid" /></g>
-                      ) : <circle key={i} cx={p.x} cy={p.y} r={p.size / 2.6} className="fmt-grid" />))}
-                      <circle cx="50" cy="50" r="6" className="fmt-hub" />
-                    </svg>
+                    <GridboxBody format={k} color={color || GRIDBOX_COLORS[0]} demo size={64} />
                     <span>{f.label}</span>
                   </button>
                 ))}
@@ -225,8 +219,8 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
             <div className="field">
               <span>Couleur de la boîte</span>
               <div className="swatches">
-                {BOX_COLORS.map((c) => (
-                  <button key={c} type="button" className={`swatch${(color || BOX_COLORS[0]) === c ? ' is-active' : ''}`} style={{ background: c }} onClick={() => setColor(c)} aria-label={`Couleur ${c}`} aria-pressed={(color || BOX_COLORS[0]) === c} />
+                {GRIDBOX_COLORS.map((c, i) => (
+                  <button key={c} type="button" className={`swatch is-metal${(color || GRIDBOX_COLORS[0]) === c ? ' is-active' : ''}`} style={{ background: c }} onClick={() => setColor(c)} aria-label={`Couleur ${GRIDBOX_COLOR_NAMES[i]}`} title={GRIDBOX_COLOR_NAMES[i]} aria-pressed={(color || GRIDBOX_COLORS[0]) === c} />
                 ))}
               </div>
             </div>

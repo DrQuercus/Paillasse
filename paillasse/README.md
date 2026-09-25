@@ -167,8 +167,11 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   autre puck ils s'échangent), un puck **du dessus** (ses cases numérotées, 12 par défaut ; une boîte se glisse
   vers une autre case). Quatre types de boîtes à grilles, avec un numéro ou une annotation (« 17 — apoF ») :
   **4 grilles non clippées** (1–4), **4 grilles clippées** (1–4), **4 clippées + 4 non clippées** (C1–C4 et N1–N4)
-  et **12 grilles** (1–12) ; la boîte s'affiche ronde, avec son repère de position 1, et chaque grille est dessinée
-  (cuivre ou or selon le support, anneau de clip, halo du criblage). Ranger des grilles, c'est noter leurs
+  et **12 grilles** (1–12). Chaque boîte est dessinée comme celles du commerce, vue de dessus, avec son cran, sa vis
+  et ses numéros gravés : la boîte de 12 (type Molecular Dimensions) a 1 à 8 sur le pourtour et 9 à 12 autour de
+  la vis ; la boîte hybride (type MiTeGen) a les clippées à gauche, dans des logements ronds à oreilles, et les
+  non clippées à droite, dans des losanges ; couleurs d'aluminium anodisé (argent, or, rose, cuivre…). Chaque
+  grille est dessinée dans son logement (cuivre ou or selon le support, anneau de clip, halo du criblage). Ranger des grilles, c'est noter leurs
   conditions une fois pour toutes les grilles de la série : échantillon, concentration, additif, support
   (Quantifoil, UltrAuFoil, C-flat… proposés), glow discharge, Vitrobot (blot, force, humidité, température),
   date, session ; les conditions de la série précédente sont reprises, et dans une boîte 4+4 on choisit clippées
@@ -418,7 +421,8 @@ client/
   src/pages/TemplatesPage.jsx  galerie des modèles ; TemplateEditPage.jsx : édition
   src/lib/inventory.js         stockage côté interface (inventory-core.js = copie conforme du serveur, testée)
   src/components/storage/      labo dessiné, intérieur des appareils, boîte, fiche du tube, encart « Tubes » ;
-                               cryo.jsx : dewar, canister, puck, boîte ronde, dessin des grilles, criblage
+                               cryo.jsx : dewar, canister, puck, boîte à grilles, dessin des grilles, criblage
+  src/lib/gridbox.js           plan des boîtes à grilles (logements, cran, vis, numéros), testé
   src/pages/StoragePage.jsx    page Stockage
 deploy/                        service systemd, sauvegarde et son timer
 ```

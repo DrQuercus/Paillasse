@@ -3,6 +3,7 @@ import { Search, ShoppingBag } from 'lucide-react';
 import { CAP_HEX, decodeCell, freePositions, isAppliance, positionLabel, unitLabel, unitPath } from '../../lib/inventory.js';
 import Modal from '../Modal.jsx';
 import { TempChip, boxColor } from './bits.jsx';
+import { GridboxBody } from './cryo.jsx';
 
 const fold = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -89,6 +90,7 @@ export default function BoxPicker({ tree, title, need = 1, moving = [], confirmL
           {box?.kind === 'gridbox' && (
             <>
               <p className="small muted">Cliquez la première position voulue.</p>
+              <GridboxBody format={box.format} color={boxColor(box)} map={box.map ?? ''} marks={positions?.map((p) => p.col) ?? []} inside size={190} className="pick-gbox" />
               <div className="pick-row" style={{ '--box': boxColor(box) }}>
                 {Array.from({ length: box.cols }, (_, c) => {
                   const taken = occupied.has(`0,${c}`);

@@ -12,7 +12,8 @@ import PasteDialog from './PasteDialog.jsx';
 import SampleForm from './SampleForm.jsx';
 import { BulkPanel, SamplePanel } from './SamplePanel.jsx';
 import { Cap, FillBar, TYPE_SHORT, TypeIcon, boxColor } from './bits.jsx';
-import { GridDisc, SCREENING_COLORS, gridboxSpots } from './cryo.jsx';
+import { GridDisc, GridboxBody, PocketShape, SCREENING_COLORS } from './cryo.jsx';
+import { gridboxLayout } from '../../lib/gridbox.js';
 
 // Tube en cours de glissement (dataTransfer n'est pas lisible pendant le survol)
 let draggedSample = null;
@@ -66,6 +67,14 @@ function BoxSummary({ unit, samples, free, typeFilter, onType }) {
 }
 
 /** Boîte à grilles, rien de choisi : remplissage, criblage (qui filtre), mode d'emploi. */
+// Comment lire la boîte, tenue cran en haut
+const GRIDBOX_HINTS = {
+  g4: 'Cran en haut : la position 1 est juste à sa droite, puis 2, 3, 4 dans le sens des aiguilles d’une montre.',
+  g4c: 'Cran en haut : la position 1 est juste à sa droite, puis 2, 3, 4 dans le sens des aiguilles d’une montre.',
+  g4c4: 'Cran en haut : grilles clippées à gauche (C1 à C4 de haut en bas), non clippées à droite dans les losanges (N1 à N4).',
+  g12: 'Le cran du bord est juste avant la position 1 : 1 à 8 sur le pourtour dans le sens des aiguilles d’une montre, 9 à 12 autour de la vis.',
+};
+
 function GridBoxSummary({ unit, samples, free, filter, onFilter }) {
   const screening = (s) => s.details?.screening ?? 'todo';
   const byStatus = Object.keys(GRID_SCREENING).map((k) => [k, samples.filter((s) => screening(s) === k)]).filter(([, l]) => l.length);
@@ -89,8 +98,7 @@ function GridBoxSummary({ unit, samples, free, filter, onFilter }) {
       <ul className="box-tips">
         <li><strong>Position vide</strong> : ranger une ou plusieurs grilles, avec leurs conditions.</li>
         <li><strong>Grille</strong> : sa fiche et son criblage ; <strong>glissez-la</strong> vers une autre position.</li>
-        {unit.format === 'g4c4' && <li><strong>C1–C4</strong> : grilles clippées ; <strong>N1–N4</strong> : non clippées.</li>}
-        <li>Le <strong>repère</strong> en haut de la boîte marque la position 1.</li>
+        <li>{GRIDBOX_HINTS[unit.format]}</li>
       </ul>
       {free === 0 && <p className="out-note">Boîte pleine.</p>}
     </div>
@@ -299,7 +307,7 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
       s && landed.has(s.id) ? 'is-landed' : '',
       s && dimmed(s) ? 'is-dim' : '',
       spot ? 'gcell' : '',
-      spot?.clipped ? 'is-clip' : '',
+      spot ? `is-${spot.shape}` : '',
       !s && cell?.row === r && cell?.col === c ? 'is-target' : '',
       g ? 'is-ghost' : '',
       dropAt === key ? 'is-drop' : '',
@@ -323,12 +331,16 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
         aria-label={s ? `${P(r, c)} : ${s.name}, ${s.code}${s.status === 'out' ? (round ? ', au microscope' : ', hors du froid') : ''}` : `${P(r, c)} : libre`}
         aria-pressed={s ? sel.includes(s.id) : undefined}
         title={s ? tubeTitle(s) : `${P(r, c)} : libre, cliquer pour ranger ici`}
-        style={spot ? { left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.size}%` } : undefined}
+        style={spot ? { left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.w}%`, height: `${spot.h}%`, '--disc': `${(spot.disc / spot.w) * 100}%` } : undefined}
       >
         {spot
-          ? (s ? <GridDisc sample={s} clipped={isClippedPosition(unit, c)} out={s.status === 'out'} /> : g ? <span className="ghost-cap">{g}</span> : <span className="hole" />)
+          ? (
+            <>
+              <svg className="gcell-hl" viewBox={`${spot.x - spot.w / 2} ${spot.y - spot.h / 2} ${spot.w} ${spot.h}`} aria-hidden="true"><PocketShape p={spot} /></svg>
+              {s ? <span className="gdisc"><GridDisc sample={s} clipped={isClippedPosition(unit, c)} out={s.status === 'out'} /></span> : g ? <span className="gdisc"><span className="ghost-cap">{g}</span></span> : null}
+            </>
+          )
           : (s ? <Cap sample={s} label={cellSize >= 34} className={s.status === 'out' ? 'is-out' : ''} size="82%" /> : g ? <span className="ghost-cap">{g}</span> : <span className="hole" />)}
-        {spot && <span className={`gpos${spot.lab ? ' is-in' : ''}`} style={spot.lab ? { left: `${spot.lab.x}%`, top: `${spot.lab.y}%` } : undefined}>{P(r, c)}</span>}
       </button>
     );
   };
@@ -397,10 +409,9 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
         </header>
         {round ? (
           <div className="gbox-wrap">
-            <div className="gbox" style={{ '--box': boxColor(unit), width: boxSize, height: boxSize }} role="group" aria-label={`Boîte ${unit.name} : ${GRIDBOX_FORMATS[unit.format]?.label}, position 1 en haut`}>
-              <span className="gbox-mark" title="Repère : position 1" aria-hidden="true" />
-              <span className="gbox-hub" aria-hidden="true" />
-              {gridboxSpots(unit.format).map((spot, c) => renderCell(0, c, spot))}
+            <div className="gbox" style={{ width: boxSize, height: boxSize }} role="group" aria-label={`Boîte ${unit.name} : ${GRIDBOX_FORMATS[unit.format]?.label}. ${GRIDBOX_HINTS[unit.format]}`}>
+              <GridboxBody format={unit.format} color={boxColor(unit)} labels />
+              {gridboxLayout(unit.format).spots.map((spot, c) => renderCell(0, c, spot))}
             </div>
           </div>
         ) : grid ? (
