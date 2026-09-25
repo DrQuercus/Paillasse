@@ -265,6 +265,22 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
     serveur depuis le démarrage (erreurs en rouge).
 - **Journal** chronologique, **recherche plein texte** en français (préfixes : « purif » trouve « purification »).
 - **Impression / PDF** de n'importe quelle version, avec ses empreintes en pied de page.
+- **Export Markdown** (`.md`), pour Obsidian, un dépôt Git ou n'importe quel éditeur de texte :
+  - *une entrée* (bouton « Markdown » à côté d'« Imprimer », et dans la fenêtre d'une version figée) : « Fichier .md »
+    (le texte seul, les images restent sur le serveur) ou « .md et ses fichiers » (zip : la note et un dossier
+    `fichiers/` avec ses images et pièces jointes, liens relatifs : le dossier s'ouvre tel quel dans Obsidian).
+    Une entrée verrouillée s'exporte depuis sa version de verrouillage, une version figée n'emporte que les fichiers
+    qui existaient alors ;
+  - *un projet* (bouton « Markdown » de la page du projet) : zip avec une note par entrée, les fichiers joints et une
+    note d'index (tableau des entrées avec leur état et leur auteur) ;
+  - *l'export complet* contient aussi un dossier `markdown/` (une note par entrée, liens vers `files/`).
+  Chaque note commence par des propriétés YAML (titre, date, projet, auteur, statut, version, empreinte SHA-256,
+  date d'export, `tags: [paillasse]`), puis le contenu en Markdown GFM (titres, listes, cases à cocher, tableaux,
+  code, liens, images) ; les encarts deviennent des citations lisibles (calcul avec ses entrées et résultats, figure
+  de gel et tableau des bandes, graphique et résultats statistiques, tubes et leur emplacement, séquence citée), la
+  liste des pièces jointes avec leur taille et leur SHA-256, et l'état de la version. Souligné, surligné, indice et
+  exposant restent en HTML en ligne (`<u>`, `<mark>`, `<sub>`, `<sup>`), compris par Obsidian et GitHub.
+  C'est une copie de lecture : un `.md` ne se réimporte pas, et seule la version figée dans Paillasse fait foi.
 - **Export** en un clic : zip avec `data.json`, chaque entrée en HTML autonome et tous les fichiers (vos projets et
   ceux où vous êtes membre ; l'administrateur exporte tout depuis Maintenance › Données).
 
@@ -482,6 +498,7 @@ server/
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
   src/lib/render.js            rendu HTML (impression, export)
+  src/lib/markdown.js          rendu Markdown GFM (propriétés YAML, encarts) ; markdownExport.js : .md seul ou zip
   src/lib/calc.js              encart de calcul : vérification, rendu imprimable, texte de recherche
   src/lib/gel.js               encart de figure de gel : vérification, rendu imprimable, texte de recherche
   src/lib/stat.js              encart de graphique statistique : vérification, rendu imprimable, texte de recherche

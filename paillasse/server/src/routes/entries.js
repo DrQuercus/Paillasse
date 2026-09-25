@@ -5,6 +5,8 @@ import { HttpError, notFound } from '../lib/errors.js';
 import { EMPTY_DOC, docToPlainText, isDoc } from '../lib/doc.js';
 import { createVersion, verifyEntry } from '../lib/versions.js';
 import { renderEntryPage } from '../lib/render.js';
+import { safeFileName } from '../lib/markdown.js';
+import { entryFileBase, markdownOnServer, markdownWithFiles, originOf, sendZip, setDownload } from '../lib/markdownExport.js';
 import { cleanCalcNode } from '../lib/calc.js';
 import { cleanGelNode, gelAttachmentIds } from '../lib/gel.js';
 import { cleanStatNode, statAttachmentIds } from '../lib/stat.js';
@@ -247,21 +249,24 @@ router.get('/:id/verify', async (req, res) => {
   res.json(await verifyEntry({ query }, req.params.id));
 });
 
+/** Version demandée (?version=N ou last) ; sans version : la copie de travail. */
+async function findVersion(entry, wanted) {
+  const n = wanted === 'last' ? entry.version_count : Number(wanted);
+  if (!(n > 0)) return null;
+  const { rows } = await query(
+    `SELECT v.*, u.display_name AS author FROM entry_versions v JOIN users u ON u.id = v.created_by
+     WHERE v.entry_id = $1 AND v.version_number = $2`,
+    [entry.id, n],
+  );
+  if (!rows[0]) throw notFound('Version');
+  return rows[0];
+}
+
 // Page imprimable (Fichier > Imprimer > Enregistrer en PDF)
 router.get('/:id/print', async (req, res) => {
   await assertEntry(req.user, req.params.id);
   const entry = await loadEntry(req.params.id, req.user);
-  let version = null;
-  const n = req.query.version === 'last' ? entry.version_count : Number(req.query.version);
-  if (n > 0) {
-    const { rows } = await query(
-      `SELECT v.*, u.display_name AS author FROM entry_versions v JOIN users u ON u.id = v.created_by
-       WHERE v.entry_id = $1 AND v.version_number = $2`,
-      [entry.id, n],
-    );
-    if (!rows[0]) throw notFound('Version');
-    version = rows[0];
-  }
+  const version = await findVersion(entry, req.query.version);
   res.type('html').send(renderEntryPage({
     entry,
     project: { name: entry.project_name },
@@ -269,6 +274,31 @@ router.get('/:id/print', async (req, res) => {
     author: version?.author,
     printButton: true,
   }));
+});
+
+// Markdown : .md seul (fichiers laissés sur le serveur) ou, avec ?files=1, zip avec les fichiers joints.
+// Une version figée n'emporte que les fichiers qui existaient quand elle a été figée.
+router.get('/:id/markdown', async (req, res) => {
+  await assertEntry(req.user, req.params.id);
+  const entry = await loadEntry(req.params.id, req.user);
+  const version = await findVersion(entry, req.query.version);
+  const { rows: attachments } = await query(
+    `SELECT id, sha256, filename, size_bytes, created_at FROM attachments
+     WHERE entry_id = $1 AND ($2::timestamptz IS NULL OR created_at <= $2) ORDER BY created_at`,
+    [entry.id, version?.created_at ?? null],
+  );
+  const data = { entry, project: { name: entry.project_name }, version, author: version?.author, attachments, origin: originOf(req) };
+  const base = entryFileBase(version ?? entry) + (version ? ` (v${version.version_number})` : '');
+  if (req.query.files !== '1') {
+    setDownload(res, `${base}.md`, 'text/markdown; charset=utf-8');
+    res.send(markdownOnServer(data));
+    return;
+  }
+  const { md, files } = markdownWithFiles(data);
+  await sendZip(res, `${safeFileName(base)}.zip`, (zip, addFile) => {
+    zip.append(md, { name: `${base}/${base}.md` });
+    for (const f of files) addFile(f.path, `${base}/fichiers/${f.name}`);
+  });
 });
 
 export default router;

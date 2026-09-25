@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Archive, Eye, FilePlus2, Pencil, Trash2, UserPlus, Users } from 'lucide-react';
+import { Archive, Eye, FileDown, FilePlus2, Pencil, Trash2, UserPlus, Users } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import EntryList from '../components/EntryList.jsx';
@@ -87,6 +87,10 @@ export default function ProjectPage() {
           {project.role === 'member' && (
             <button type="button" className="btn btn-ghost" onClick={() => setSharing(true)}><Users size={15} /> Membres</button>
           )}
+          <a className="btn btn-ghost" href={`/api/projects/${id}/markdown`} download
+            title="Toutes les entrées du projet en Markdown, avec leurs fichiers et une note d’index (.zip), pour Obsidian ou un éditeur de texte">
+            <FileDown size={15} /> Markdown
+          </a>
           {user?.is_admin && (
             <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setPurging(true)} title="Supprimer le projet et son contenu (administrateur)"><Trash2 size={15} /> Supprimer</button>
           )}

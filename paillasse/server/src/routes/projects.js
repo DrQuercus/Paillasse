@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { query, tx } from '../db.js';
 import { assertProject, visibleProjects } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
+import { escapeMd, safeFileName } from '../lib/markdown.js';
+import { entryFileBase, markdownWithFiles, originOf, sendZip, uniqueName } from '../lib/markdownExport.js';
 
 const router = Router();
 const COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -106,6 +108,68 @@ router.patch('/:id', async (req, res) => {
   );
   if (!rowCount) throw notFound('Projet');
   res.json(await loadProject(req.params.id, req.user));
+});
+
+// --- Markdown : tout le projet dans un dossier (une note par entrée, fichiers joints, note d'index) ----------------
+
+router.get('/:id/markdown', async (req, res) => {
+  const p = await loadProject(req.params.id, req.user);
+  const { rows: entries } = await query(
+    `SELECT e.*, u.display_name AS created_by_name FROM entries e JOIN users u ON u.id = e.created_by
+     WHERE e.project_id = $1 AND NOT e.archived ORDER BY e.entry_date, e.created_at`,
+    [p.id],
+  );
+  const ids = entries.map((e) => e.id);
+  const [{ rows: versions }, { rows: attachments }, people] = await Promise.all([
+    query(
+      `SELECT DISTINCT ON (v.entry_id) v.*, u.display_name AS author FROM entry_versions v JOIN users u ON u.id = v.created_by
+       WHERE v.entry_id = ANY($1::uuid[]) ORDER BY v.entry_id, v.version_number DESC`,
+      [ids],
+    ),
+    query('SELECT id, entry_id, sha256, filename, size_bytes, created_at FROM attachments WHERE entry_id = ANY($1::uuid[]) ORDER BY created_at', [ids]),
+    members(p.id),
+  ]);
+  const lastVersion = new Map(versions.map((v) => [v.entry_id, v]));
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const folder = safeFileName(p.name, 'projet');
+  const used = new Set([folder.toLowerCase()]);
+  const origin = originOf(req);
+  const stamp = new Date().toLocaleDateString('sv-SE');
+  const index = [];
+  await sendZip(res, `${folder} (Markdown ${stamp}).zip`, (zip, addFile) => {
+    for (const e of entries) {
+      // Une entrée verrouillée : sa version de verrouillage, comme à l'impression et dans l'export complet
+      const version = e.status === 'locked' ? lastVersion.get(e.id) ?? null : null;
+      const parent = e.parent_entry_id ? byId.get(e.parent_entry_id) ?? null : null;
+      const files = attachments.filter((a) => a.entry_id === e.id && (!version || a.created_at <= version.created_at));
+      const name = uniqueName(used, entryFileBase(version ?? e));
+      const out = markdownWithFiles({
+        entry: { ...e, project_name: p.name, parent }, project: p, version, author: version?.author, attachments: files, origin,
+      });
+      zip.append(out.md, { name: `${folder}/${name}.md` });
+      for (const f of out.files) addFile(f.path, `${folder}/fichiers/${f.name}`);
+      index.push({ e, version, name });
+    }
+    const shared = people.filter((m) => m.status === 'accepted').map((m) => m.display_name);
+    const lines = [
+      '---', `projet: ${JSON.stringify(p.name)}`, `proprietaire: ${JSON.stringify(p.owner_name)}`,
+      `entrees: ${entries.length}`, `exporte_le: ${JSON.stringify(new Date().toISOString())}`, 'source: Paillasse', 'tags: [paillasse]', '---', '',
+      `# ${escapeMd(p.name)}`, '',
+    ];
+    if (p.description) lines.push(escapeMd(p.description), '');
+    lines.push(`Projet de ${escapeMd(p.owner_name)}${shared.length ? `, partagé avec ${shared.map(escapeMd).join(', ')}` : ', privé'}.`, '');
+    if (index.length) {
+      lines.push('| Date | Entrée | État | Auteur |', '| --- | --- | --- | --- |');
+      for (const { e, version, name } of index) {
+        const state = e.status === 'locked' ? `verrouillée (v${version?.version_number ?? e.version_count})` : e.version_count ? `brouillon (${e.version_count} version${e.version_count > 1 ? 's' : ''})` : 'brouillon';
+        lines.push(`| ${e.entry_date} | [${escapeMd((version ?? e).title)}](${encodeURI(`${name}.md`).replace(/[()]/g, (c) => (c === '(' ? '%28' : '%29'))}) | ${state} | ${escapeMd(e.created_by_name)} |`);
+      }
+    } else {
+      lines.push('*Aucune entrée.*');
+    }
+    lines.push('', '---', '', `Exporté de Paillasse le ${new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' })}. Une entrée verrouillée est exportée depuis sa version de verrouillage ; son empreinte SHA-256 figure dans ses propriétés.`);
+    zip.append(`${lines.join('\n')}\n`, { name: `${folder}/${folder}.md` });
+  });
 });
 
 // --- Partage ---------------------------------------------------------------------------------------------

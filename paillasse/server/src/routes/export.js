@@ -4,6 +4,7 @@ import { ZipArchive } from 'archiver';
 import { query } from '../db.js';
 import { visibleProjectIds } from '../lib/access.js';
 import { renderEntryPage } from '../lib/render.js';
+import { entryToMarkdown } from '../lib/markdown.js';
 import { blobPath } from '../lib/storage.js';
 import { toGenbank } from '../lib/seq/genbank.js';
 import { SAMPLE_TYPES, locationText, positionLabel, unitPath } from '../lib/inventory.js';
@@ -24,6 +25,8 @@ data.json      Les données : projets, modèles, entrées, versions figées
                Export complet depuis la page Maintenance : tout (scope = "all").
 entries/       Chaque entrée en HTML autonome, lisible dans n'importe quel navigateur.
                Une entrée verrouillée est rendue depuis sa version de verrouillage.
+markdown/      Les mêmes entrées en Markdown (.md), avec leurs propriétés (date, projet, auteur,
+               empreinte) : le dossier de l'export s'ouvre comme un coffre Obsidian.
 files/         Les pièces jointes, nommées <id>_<nom d'origine>.
                Leur SHA-256 figure dans data.json (champ attachments[].sha256).
                Une image retouchée est un fichier à part : derived_from désigne
@@ -101,6 +104,9 @@ router.get('/', async (req, res) => {
   };
   const projectById = new Map(projects.map((p) => [p.id, p]));
   const userById = new Map(users.map((u) => [u.id, u]));
+  const entryById = new Map(entries.map((e) => [e.id, e]));
+  const filesByEntry = new Map();
+  for (const a of attachments) filesByEntry.set(a.entry_id, [...(filesByEntry.get(a.entry_id) ?? []), a]);
   const lastVersion = new Map();
   for (const v of versions) lastVersion.set(v.entry_id, v);
 
@@ -134,7 +140,15 @@ router.get('/', async (req, res) => {
       author: version ? userById.get(version.created_by)?.display_name : null, rewriteUrl,
     });
     const archivedTag = e.archived ? '_archivee' : '';
-    archive.append(html, { name: `entries/${e.entry_date}_${slug(e.title)}_${e.id.slice(0, 8)}${archivedTag}.html` });
+    const base = `${e.entry_date}_${slug(e.title)}_${e.id.slice(0, 8)}${archivedTag}`;
+    archive.append(html, { name: `entries/${base}.html` });
+    const parent = e.parent_entry_id ? entryById.get(e.parent_entry_id) ?? null : null;
+    archive.append(entryToMarkdown({
+      entry: { ...e, created_by_name: userById.get(e.created_by)?.display_name, project_name: projectById.get(e.project_id)?.name, parent },
+      project: projectById.get(e.project_id), version, author: version ? userById.get(version.created_by)?.display_name : null,
+      attachments: (filesByEntry.get(e.id) ?? []).filter((a) => !version || a.created_at <= version.created_at),
+      rewriteUrl, fileLink: (a) => `../files/${fileNames.get(a.id)}`,
+    }), { name: `markdown/${base}.md` });
   }
   for (const a of attachments) {
     const p = blobPath(a.sha256);

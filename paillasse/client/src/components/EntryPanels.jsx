@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { FileText, GitCommitVertical, Lock, Paperclip, Printer, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, FileDown, FileText, FolderDown, GitCommitVertical, Lock, Paperclip, Printer, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, fileUrl } from '../api.js';
 import { formatDateTime, formatSize, shortHash } from '../lib/format.js';
 import { describeEdit } from '../lib/imageEdit.js';
@@ -147,6 +147,50 @@ export function IntegrityPanel({ entryId, lastHash, versionCount }) {
             </>
           )}
           <p className="muted small">Vérifié le {formatDateTime(report.checked_at)}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Export Markdown d'une entrée (ou d'une version) : .md seul, ou zip avec les fichiers joints à côté
+ * (liens relatifs, à ouvrir dans Obsidian ou n'importe quel éditeur Markdown).
+ */
+export function MarkdownMenu({ entryId, version, hasFiles, label = 'Markdown' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const base = `/api/entries/${entryId}/markdown${version ? `?version=${version}` : ''}`;
+  const withFiles = `${base}${version ? '&' : '?'}files=1`;
+  return (
+    <div className="tool-menu export-menu" ref={ref}>
+      <button type="button" className="btn btn-ghost" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
+        title="Exporter en Markdown (.md), pour Obsidian, un dépôt Git ou un éditeur de texte">
+        <FileDown size={15} /> {label} <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="menu menu-right" role="menu">
+          <a role="menuitem" className="menu-item menu-item-2" href={base} download onClick={() => setOpen(false)}>
+            <FileText size={15} aria-hidden="true" />
+            <span><strong>Fichier .md</strong><span>Le texte seul ; les images restent sur le serveur</span></span>
+          </a>
+          {hasFiles && (
+            <a role="menuitem" className="menu-item menu-item-2" href={withFiles} download onClick={() => setOpen(false)}>
+              <FolderDown size={15} aria-hidden="true" />
+              <span><strong>.md et ses fichiers (.zip)</strong><span>Images et pièces jointes à côté : s’ouvre tel quel dans Obsidian</span></span>
+            </a>
+          )}
         </div>
       )}
     </div>

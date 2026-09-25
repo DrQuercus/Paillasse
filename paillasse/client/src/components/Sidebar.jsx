@@ -114,7 +114,7 @@ export default function Sidebar() {
         </div>
 
         <div className="sidebar-foot">
-          <a className="nav-link" href="/api/export" download title="Vos projets, ceux où vous êtes membre, et ce qui est commun au labo (séquences, stockage, modèles)">
+          <a className="nav-link" href="/api/export" download title="Zip : vos projets, ceux où vous êtes membre, et ce qui est commun au labo (séquences, stockage, modèles) ; chaque entrée en HTML et en Markdown">
             <Download size={16} /> Exporter mon cahier
           </a>
           <div className="sidebar-user">

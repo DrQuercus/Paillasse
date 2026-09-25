@@ -8,7 +8,7 @@ import NoteEditor, { ReadOnlyDoc } from '../components/NoteEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import PurgeDialog from '../components/admin/PurgeDialog.jsx';
 import { StatusBadge } from '../components/EntryList.jsx';
-import { FilesPanel, IntegrityPanel, PrintLink, VersionsPanel } from '../components/EntryPanels.jsx';
+import { FilesPanel, IntegrityPanel, MarkdownMenu, PrintLink, VersionsPanel } from '../components/EntryPanels.jsx';
 
 const SAVE_LABELS = {
   saved: 'Enregistré',
@@ -301,6 +301,7 @@ export default function EntryPage({ id }) {
         {readOnly && <span className="readonly-badge" title="Vous n’êtes pas membre de ce projet : accès administrateur, en lecture seule"><Eye size={13} aria-hidden="true" /> Lecture seule</span>}
         <div className="head-actions">
           <PrintLink entryId={id} version={locked ? 'last' : null}>Imprimer</PrintLink>
+          <MarkdownMenu entryId={id} version={locked ? 'last' : null} hasFiles={attachments.length > 0} />
           {!frozen && (
             <>
               <button type="button" className="btn btn-ghost" onClick={saveAsTemplate} title="Enregistrer comme modèle">
@@ -478,6 +479,7 @@ export default function EntryPage({ id }) {
           footer={(
             <>
               <PrintLink entryId={id} version={openVersion.version_number}>Imprimer cette version</PrintLink>
+              <MarkdownMenu entryId={id} version={openVersion.version_number} hasFiles={attachments.length > 0} />
               {!frozen && (
                 <button type="button" className="btn btn-primary" onClick={() => restore(openVersion)}>
                   <RotateCcw size={15} /> Restaurer dans le brouillon

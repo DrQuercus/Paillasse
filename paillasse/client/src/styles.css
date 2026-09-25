@@ -2161,3 +2161,19 @@ button.access-chip:hover { box-shadow: 0 0 0 1px currentColor; }
 .people-filter:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
 .invitation-actions .btn-small, .share-actions .btn-small, .adm-card-head .btn-small { margin-left: 0; }
 .readonly-notice { margin: -1rem 0 1.25rem; }
+
+/* ---------- Export Markdown ---------- */
+.menu-right { left: auto; right: 0; }
+.export-menu .menu { min-width: 19rem; }
+a.menu-item { color: var(--ink); text-decoration: none; }
+.menu-item-2 { align-items: flex-start; }
+.menu-item-2 svg { flex: none; margin-top: .15rem; }
+.menu-item-2 > span { display: flex; flex-direction: column; gap: .05rem; }
+.menu-item-2 strong { font-weight: 500; }
+.menu-item-2 span span { font-size: .78rem; color: var(--ink-3); }
+.modal-foot .export-menu .menu { top: auto; bottom: calc(100% + 4px); }
+@media (max-width: 640px) {
+  /* Sur téléphone, le menu prend la largeur de l'écran sous son bouton */
+  .export-menu .menu { position: fixed; top: auto; left: 1rem; right: 1rem; min-width: 0; }
+  .modal-foot .export-menu .menu { bottom: 5rem; }
+}
