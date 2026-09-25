@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Search, ShoppingBag } from 'lucide-react';
-import { CAP_HEX, decodeCell, freePositions, isAppliance, posLabel, unitPath } from '../../lib/inventory.js';
+import { CAP_HEX, decodeCell, freePositions, isAppliance, positionLabel, unitLabel, unitPath } from '../../lib/inventory.js';
 import Modal from '../Modal.jsx';
 import { TempChip, boxColor } from './bits.jsx';
 
@@ -19,7 +19,7 @@ export function occupiedOf(box, moving = []) {
  * Choisir une boîte (ou un sac) et la place de départ : déplacer des tubes, ou savoir où en ranger.
  * onPick(box, positions) ; positions = null pour un sac.
  */
-export default function BoxPicker({ tree, title, need = 1, moving = [], confirmLabel = 'Choisir', onPick, onClose }) {
+export default function BoxPicker({ tree, title, need = 1, moving = [], confirmLabel = 'Choisir', kinds = ['box', 'bag', 'gridbox'], onPick, onClose }) {
   const [q, setQ] = useState('');
   const [box, setBox] = useState(null);
   const [start, setStart] = useState(null);
@@ -28,22 +28,23 @@ export default function BoxPicker({ tree, title, need = 1, moving = [], confirmL
   const groups = useMemo(() => {
     const out = [];
     for (const u of tree.byId.values()) {
-      if (u.kind !== 'box' && u.kind !== 'bag') continue;
+      if (!kinds.includes(u.kind)) continue;
       const path = unitPath(tree.byId, u.id);
       const appliance = path.find(isAppliance);
-      const inside = path.slice(path.indexOf(appliance) + 1).map((p) => p.name).join(' › ');
-      if (q && !fold(`${path.map((p) => p.name).join(' ')}`).includes(fold(q))) continue;
-      const free = u.kind === 'box' ? u.rows * u.cols - occupiedOf(u, moving).size : Infinity;
+      const inside = path.slice(path.indexOf(appliance) + 1).map(unitLabel).join(' › ');
+      if (q && !fold(`${path.map(unitLabel).join(' ')}`).includes(fold(q))) continue;
+      const free = u.kind === 'bag' ? Infinity : u.rows * u.cols - occupiedOf(u, moving).size;
       const key = appliance?.id ?? '';
       let g = out.find((x) => x.key === key);
       if (!g) { g = { key, appliance, items: [] }; out.push(g); }
       g.items.push({ unit: u, inside, free });
     }
+    for (const g of out) g.items.sort((a, b) => a.inside.localeCompare(b.inside, 'fr', { numeric: true }));
     return out;
-  }, [tree, q, moving]);
+  }, [tree, q, moving, kinds]);
 
-  const occupied = box?.kind === 'box' ? occupiedOf(box, moving) : new Set();
-  const positions = box?.kind === 'box' ? freePositions(box, occupied, need, start ?? undefined) : null;
+  const occupied = box && box.kind !== 'bag' ? occupiedOf(box, moving) : new Set();
+  const positions = box && box.kind !== 'bag' ? freePositions(box, occupied, need, start ?? undefined) : null;
   const enough = box && (box.kind === 'bag' || positions.length >= need);
 
   return (
@@ -54,7 +55,7 @@ export default function BoxPicker({ tree, title, need = 1, moving = [], confirmL
       footer={(
         <>
           <span className="modal-foot-note">
-            {box ? (box.kind === 'bag' ? `Dans « ${box.name} »` : enough ? `${need} place${need > 1 ? 's' : ''} : ${positions.map((p) => posLabel(p.row, p.col)).join(', ')}` : `Pas assez de places libres (${positions.length} pour ${need}).`) : 'Choisissez une boîte.'}
+            {box ? (box.kind === 'bag' ? `Dans « ${box.name} »` : enough ? `${need} place${need > 1 ? 's' : ''} : ${positions.map((p) => positionLabel(box, p.row, p.col)).join(', ')}` : `Pas assez de places libres (${positions.length} pour ${need}).`) : 'Choisissez une boîte.'}
           </span>
           <button type="button" className="btn" onClick={onClose}>Annuler</button>
           <button type="button" className="btn btn-primary" disabled={!enough} onClick={() => onPick(box, positions)}>{confirmLabel}</button>
@@ -74,7 +75,7 @@ export default function BoxPicker({ tree, title, need = 1, moving = [], confirmL
                     <li key={unit.id}>
                       <button type="button" className={`picker-box${box?.id === unit.id ? ' is-selected' : ''}`} onClick={() => { setBox(unit); setStart(null); }} disabled={free < 1}>
                         {unit.kind === 'bag' ? <ShoppingBag size={14} aria-hidden="true" /> : <span className="picker-swatch" style={{ background: boxColor(unit) }} />}
-                        <span className="picker-box-name">{inside || unit.name}</span>
+                        <span className="picker-box-name">{inside || unitLabel(unit)}</span>
                         <span className="muted small">{unit.kind === 'bag' ? 'sac' : `${free} libre${free > 1 ? 's' : ''}`}</span>
                       </button>
                     </li>
@@ -85,6 +86,22 @@ export default function BoxPicker({ tree, title, need = 1, moving = [], confirmL
           </div>
         </div>
         <div className="picker-col picker-preview">
+          {box?.kind === 'gridbox' && (
+            <>
+              <p className="small muted">Cliquez la première position voulue.</p>
+              <div className="pick-row" style={{ '--box': boxColor(box) }}>
+                {Array.from({ length: box.cols }, (_, c) => {
+                  const taken = occupied.has(`0,${c}`);
+                  const chosen = positions?.some((p) => p.col === c);
+                  return (
+                    <button key={c} type="button" className={`pick-slot${taken ? ' is-taken' : ''}${chosen ? ' is-chosen' : ''}`} disabled={taken} onClick={() => setStart({ row: 0, col: c })}>
+                      {positionLabel(box, 0, c)}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
           {box?.kind === 'box' && (
             <>
               <p className="small muted">Cliquez la première place voulue ; les suivantes suivent l’ordre de lecture.</p>
@@ -104,7 +121,7 @@ export default function BoxPicker({ tree, title, need = 1, moving = [], confirmL
                         style={cell ? { '--cap': CAP_HEX[cell.color] } : undefined}
                         disabled={Boolean(cell)}
                         onClick={() => setStart({ row: r, col: c })}
-                        aria-label={`${posLabel(r, c)}${cell ? ' occupée' : ' libre'}`}
+                        aria-label={`${positionLabel(box, r, c)}${cell ? ' occupée' : ' libre'}`}
                       />
                     );
                   }),

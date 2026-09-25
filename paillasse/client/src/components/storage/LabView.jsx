@@ -5,9 +5,10 @@ import {
 } from 'lucide-react';
 import { api } from '../../api.js';
 import { useApp } from '../../context.js';
-import { ago, formatTemp, isAppliance, tempTheme } from '../../lib/inventory.js';
+import { ago, contentsText, formatTemp, isAppliance, tempTheme } from '../../lib/inventory.js';
 import ApplianceArt from './ApplianceArt.jsx';
-import { Cap, FillBar, TempChip } from './bits.jsx';
+import { FillBar, TempChip } from './bits.jsx';
+import { SampleIcon } from './cryo.jsx';
 import { APPLIANCE_PRESETS } from './UnitDialog.jsx';
 
 /** Un appareil du labo, dessiné : un clic l'ouvre. */
@@ -20,7 +21,7 @@ export function ApplianceCard({ unit, tree, onOpen }) {
         <ApplianceArt unit={unit} fill={fill} />
         <span className="appl-name">{unit.name}</span>
         <TempChip unit={unit} />
-        <span className="appl-stats">{t.boxes} boîte{t.boxes > 1 ? 's' : ''} · {t.tubes} tube{t.tubes > 1 ? 's' : ''}</span>
+        <span className="appl-stats">{t.boxes} boîte{t.boxes > 1 ? 's' : ''} · {contentsText(t, tree.children(unit.id).some((c) => c.kind === 'canister') ? 'grille' : 'tube')}</span>
         {t.capacity > 0 && <FillBar used={t.placed} capacity={t.capacity} />}
         {t.out > 0 && <span className="appl-alert"><ArrowUpFromLine size={12} aria-hidden="true" /> {t.out} sorti{t.out > 1 ? 's' : ''}</span>}
       </button>
@@ -96,7 +97,7 @@ function WatchPanel({ version, onShow, onChanged }) {
             {w[k].map((s) => (
               <li key={s.id}>
                 <button type="button" className="watch-item" onClick={() => onShow(s)}>
-                  <Cap sample={s} size={16} />
+                  <SampleIcon sample={s} size={16} />
                   <span><strong>{s.name}</strong> <span className="muted small">{s.code}{k === 'out' && s.out_since ? ` · sorti ${ago(s.out_since)}` : ''}{k === 'thawed' ? ` · ${s.thaw_count} fois` : ''}{(k === 'expired' || k === 'expiring') && s.expires_on ? ` · ${new Date(s.expires_on).toLocaleDateString('fr-FR')}` : ''}</span></span>
                 </button>
                 {k === 'out' && <button type="button" className="btn btn-small" onClick={() => back(s)} title="Remis à sa place (compte une décongélation)"><ArrowDownToLine size={13} /> Remis</button>}
@@ -140,7 +141,7 @@ function Activity({ version, onShow }) {
             <li key={i}>
               <span className={`act-icon act-${e.kind}`}><Icon size={13} aria-hidden="true" /></span>
               <button type="button" className="link-btn" onClick={() => !e.archived && onShow({ id: e.sample_id, unit_id: e.unit_id })} disabled={e.archived}>
-                <Cap sample={e} size={12} /> {e.name}
+                <SampleIcon sample={e} size={12} /> {e.name}
               </button>
               <span className="act-detail">{e.detail}</span>
               <span className="muted small">{e.author ?? '—'} · {ago(e.created_at)}</span>
@@ -167,7 +168,7 @@ export default function LabView({ tree, version, onOpen, onCreate, onEdit, onSho
             <header className="lab-room-head">
               <DoorOpen size={17} aria-hidden="true" />
               <h2>{room.name}</h2>
-              <span className="muted small">{tree.totals(room.id).tubes} tubes</span>
+              <span className="muted small">{contentsText(tree.totals(room.id))}</span>
               <button type="button" className="icon-btn" onClick={() => onEdit(room)} title="Modifier la pièce" aria-label={`Modifier ${room.name}`}><Pencil size={14} /></button>
             </header>
             <ul className="appl-grid">

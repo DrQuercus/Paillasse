@@ -679,6 +679,88 @@ const elisa = {
   ],
 };
 
+// --- Cryo-EM -----------------------------------------------------------------------------------------
+
+const vitrification = {
+  slug: 'vitrification-grilles',
+  name: 'Vitrification de grilles (cryo-EM)',
+  category: 'Cryo-EM',
+  description: 'Échantillon, glow discharge, conditions du Vitrobot, grilles testées et rangées dans leur boîte, puck et canister.',
+  content: [
+    fiche([
+      ['Échantillon', 'protéine ou complexe, lot'],
+      ['Tampon'],
+      ['Concentration'],
+      ['Additif', 'détergent, fluorine…'],
+    ]),
+    h2('Grilles et glow discharge'),
+    fiche([
+      ['Support', 'Quantifoil R1.2/1.3 Cu 300, UltrAuFoil…'],
+      ['Glow discharge', 'appareil, courant, durée, atmosphère'],
+    ]),
+    h2('Vitrification'),
+    fiche([
+      ['Appareil', 'Vitrobot Mark IV, GP2…'],
+      ['Chambre', '4 °C, 100 % d’humidité'],
+      ['Volume déposé', '3 µL'],
+      ['Temps d’attente'],
+      ['Force et temps de blot'],
+      ['Cryogène', 'éthane liquide'],
+    ]),
+    tasks(
+      'Mettre la chambre à température et humidité 30 min avant',
+      'Refroidir l’éthane liquide',
+      'Glow discharge des grilles juste avant de commencer',
+      'Déposer, attendre, blotter, plonger',
+      'Transférer chaque grille dans sa position de la boîte, sous azote',
+      'Fermer la boîte et la ranger dans son puck, dans le dewar',
+    ),
+    h2('Conditions testées'),
+    table(['Grille', 'Concentration', 'Blot (s)', 'Force', 'Remarque'], blank(8, 5, true)),
+    h2('Stockage'),
+    slot('vitrification-grilles', 'samples', 'Grilles rangées', 'Choisissez la boîte à grilles : les conditions saisies se reportent sur chaque grille, position par position', { type: 'grid', name: '' }),
+    h2('Criblage'),
+    p('Le résultat de chaque grille se note dans sa fiche (Stockage) : bonne glace, glace épaisse, agrégats, cassée…'),
+  ],
+};
+
+const criblage = {
+  slug: 'criblage-microscope',
+  name: 'Criblage et collecte au microscope',
+  category: 'Cryo-EM',
+  description: 'Grilles chargées (cités depuis le stockage), cassette, paramètres d’acquisition, décisions et suite du traitement.',
+  content: [
+    fiche([
+      ['Microscope', 'Krios, Glacios, Talos Arctica…'],
+      ['Détecteur et filtre d’énergie'],
+      ['Session', 'date, créneau, opérateur'],
+      ['Logiciel', 'EPU, SerialEM'],
+    ]),
+    h2('Grilles chargées'),
+    slot('criblage-grilles', 'samples', 'Grilles chargées au microscope', 'Citez les grilles depuis le stockage : leur adresse (canister, puck, boîte) est notée', { type: 'grid', mode: 'cite' }),
+    table(['Position cassette', 'Grille (code)', 'Atlas', 'Glace', 'Décision'], blank(12, 5, true)),
+    h2('Paramètres d’acquisition'),
+    fiche([
+      ['Grossissement, taille de pixel (Å)'],
+      ['Dose totale (e⁻/Å²)'],
+      ['Nombre de frames'],
+      ['Défocalisation (µm)', '−0,8 à −2,2'],
+      ['Ouverture de l’objectif, fente du filtre'],
+      ['Nombre de films'],
+    ]),
+    h2('Observations'),
+    p(),
+    slot('criblage-atlas', 'image', 'Atlas ou image de grille'),
+    h2('Suite'),
+    tasks(
+      'Noter le criblage de chaque grille dans sa fiche (Stockage)',
+      'Remettre les grilles non utilisées dans leur boîte',
+      'Transférer les données sur le stockage de calcul',
+      'Lancer le prétraitement (CryoSPARC Live, RELION)',
+    ),
+  ],
+};
+
 // --- Cellules -----------------------------------------------------------------------------------------
 
 const culture = {
@@ -755,6 +837,7 @@ const RAW = [
   classique, protocole, reunion, solution,
   pcr, clonage, transformation, miniprep, agarose, qpcr,
   expression, purification, sdsPage, western, dosage, elisa,
+  vitrification, criblage,
   culture, transfection,
 ];
 

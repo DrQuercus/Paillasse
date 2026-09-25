@@ -3,13 +3,14 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronRight, Warehouse } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
-import { buildTree, formatTemp, holdsSamples, isAppliance, tempTheme, unitPath } from '../lib/inventory.js';
+import { buildTree, formatTemp, holdsSamples, isAppliance, tempTheme, unitLabel, unitPath } from '../lib/inventory.js';
 import BoxView from '../components/storage/BoxView.jsx';
 import InteriorView from '../components/storage/InteriorView.jsx';
 import LabView from '../components/storage/LabView.jsx';
 import UnitDialog from '../components/storage/UnitDialog.jsx';
 import WhereIs from '../components/storage/WhereIs.jsx';
 import { KIND_ICONS } from '../components/storage/bits.jsx';
+import { CanisterView, PuckView } from '../components/storage/cryo.jsx';
 
 /** Fil d'Ariane : Stockage › pièce › appareil › étagère › rack › boîte. glow : le chemin s'allume (tube trouvé). */
 function Trail({ path, glow }) {
@@ -28,7 +29,7 @@ function Trail({ path, glow }) {
               aria-current={i === path.length - 1 ? 'page' : undefined}
             >
               {Icon && <Icon size={14} aria-hidden="true" />}
-              {isAppliance(u) && u.temperature != null ? `${formatTemp(u.temperature)} ` : ''}{u.name}
+              {isAppliance(u) && u.temperature != null ? `${formatTemp(u.temperature)} ` : ''}{unitLabel(u)}
             </Link>
           </Fragment>
         );
@@ -83,7 +84,7 @@ export default function StoragePage() {
   const create = useCallback((opts) => {
     if (opts.room) setDialog({ create: { kind: 'room', parent: null } });
     else if (opts.preset) setDialog({ create: { parent: null, preset: opts.preset } });
-    else setDialog({ create: { kind: opts.kind, parent: opts.parent ?? null } });
+    else setDialog({ create: { kind: opts.kind, parent: opts.parent ?? null, slot: opts.slot ?? null } });
   }, []);
 
   if (!tree) return <div className="page page-wide"><p className="muted">Ouverture du stockage…</p></div>;
@@ -93,7 +94,7 @@ export default function StoragePage() {
       <header className="stor-head">
         <div>
           <h1>Stockage</h1>
-          <p className="page-lead">Chaque tube a une adresse : appareil, étagère, rack, boîte, position.</p>
+          <p className="page-lead">Chaque tube et chaque grille a son adresse : appareil, étagère ou canister, rack ou puck, boîte, position.</p>
         </div>
         <WhereIs onFound={showSample} />
       </header>
@@ -111,7 +112,13 @@ export default function StoragePage() {
           onChanged={reload}
         />
       )}
-      {unit && !holdsSamples(unit) && (
+      {unit && unit.kind === 'canister' && (
+        <CanisterView unit={unit} tree={tree} onOpen={open} onCreate={create} onEdit={(u) => setDialog({ unit: u })} onMoved={reload} />
+      )}
+      {unit && unit.kind === 'puck' && (
+        <PuckView unit={unit} tree={tree} onOpen={open} onCreate={create} onEdit={(u) => setDialog({ unit: u })} onMoved={reload} />
+      )}
+      {unit && !holdsSamples(unit) && unit.kind !== 'canister' && unit.kind !== 'puck' && (
         <InteriorView unit={unit} tree={tree} onOpen={open} onCreate={create} onEdit={(u) => setDialog({ unit: u })} onMoved={reload} />
       )}
       {unit && holdsSamples(unit) && (

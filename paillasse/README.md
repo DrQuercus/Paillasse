@@ -160,14 +160,34 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   tubes oubliés hors du froid depuis plus de 2 h, périmés ou bientôt périmés, décongelés 3 fois ou plus, boîtes
   presque pleines, et l'activité récente. On colle le plan d'une boîte depuis Excel (grille ou liste
   « position, nom »), et on imprime son plan pour le couvercle.
+- **Cryo-EM : dewar › canister › puck › boîte › grille.** Le préréglage « Dewar cryo-EM (grilles) » crée d'un
+  coup les canisters, numérotés 1, 2, 3…, et leurs pucks, numérotés à la suite de ceux du labo (« 6 canisters de
+  5 pucks, n° 1 à 30 »). Le dewar se voit **du dessus** (les canisters en couronne, remplissage en anneau), un
+  canister **en coupe** (niveau 1 en haut, un puck par niveau ; on glisse un puck vers un autre niveau, sur un
+  autre puck ils s'échangent), un puck **du dessus** (ses cases numérotées, 12 par défaut ; une boîte se glisse
+  vers une autre case). Quatre types de boîtes à grilles, avec un numéro ou une annotation (« 17 — apoF ») :
+  **4 grilles non clippées** (1–4), **4 grilles clippées** (1–4), **4 clippées + 4 non clippées** (C1–C4 et N1–N4)
+  et **12 grilles** (1–12) ; la boîte s'affiche ronde, avec son repère de position 1, et chaque grille est dessinée
+  (cuivre ou or selon le support, anneau de clip, halo du criblage). Ranger des grilles, c'est noter leurs
+  conditions une fois pour toutes les grilles de la série : échantillon, concentration, additif, support
+  (Quantifoil, UltrAuFoil, C-flat… proposés), glow discharge, Vitrobot (blot, force, humidité, température),
+  date, session ; les conditions de la série précédente sont reprises, et dans une boîte 4+4 on choisit clippées
+  ou non. La fiche d'une grille note le **criblage** d'un clic (bonne glace, glace épaisse, glace fine,
+  agrégats, pas de particules, cassée, collectée), la légende de la boîte filtre par criblage, « Au microscope »
+  la sort en gardant sa place et chaque changement va dans son historique. Adresse complète :
+  « Dewar Krios › Canister 1 › Puck 3 (niveau 1) › Boîte 17 (case 3) › grille C2 », imprimée, exportée
+  (`stockage.csv`) et trouvée par « Où est… ? ». Deux modèles d'entrée (catégorie *Cryo-EM*) : **Vitrification de
+  grilles** (l'emplacement « Ranger les grilles… » ouvre le choix de la boîte puis les conditions) et
+  **Criblage et collecte au microscope** (« Citer les grilles… » note les grilles chargées avec leur adresse).
 - **Tubes dans une entrée** : bouton « Tubes » de la barre d'outils, ou emplacement « Tubes à ranger » des modèles
   (purification, miniprep, PCR, expression, clonage). Les tubes rangés depuis une entrée gardent le lien vers elle ;
   l'encart note leur adresse du jour (aliquots regroupés : « ×8, B2 à B9 ») et son lien mène là où le tube est
   aujourd'hui. On peut aussi citer des tubes déjà rangés. Imprimé et trouvé par la recherche.
-- **Modèles** (menu « Modèles ») : 18 modèles de base installés d'office, rangés par catégorie :
+- **Modèles** (menu « Modèles ») : 20 modèles de base installés d'office, rangés par catégorie :
   *Général* (entrée classique, protocole, réunion, préparation d'un tampon), *Biologie moléculaire* (PCR, clonage,
   transformation, miniprep, gel d'agarose, RT-qPCR), *Protéines* (expression, purification His-tag / Ni-NTA,
-  SDS-PAGE, western blot, dosage Bradford / BCA, ELISA) et *Cellules* (passage, transfection). Chacun apporte ses
+  SDS-PAGE, western blot, dosage Bradford / BCA, ELISA), *Cryo-EM* (vitrification de grilles, criblage et
+  collecte) et *Cellules* (passage, transfection). Chacun apporte ses
   sections, ses tableaux à compléter (plan de dépôt, anticorps, fractions, plan de plaque…), ses étapes à cocher
   pendant la manip, ses calculs déjà prêts (tampons de purification, TBST, master mix Q5 ou SYBR, milieu LB) et des
   **emplacements à remplir** : un clic ouvre le bon outil, déjà réglé (atelier Gels en mode western ou ADN,
@@ -367,6 +387,7 @@ vérifiées par le serveur à chaque enregistrement : l'éditeur peut être remp
 ```
 server/
   migrations/001_initial.sql   schéma, triggers d'ajout seul et de verrouillage
+  migrations/011_cryoem.sql    cryo-EM : canister, puck, boîte à grilles (format, case, capacité), conditions des grilles
   src/index.js                 point d'entrée Express, sert aussi client/dist
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
@@ -396,7 +417,8 @@ client/
   src/components/TemplateSlot.jsx  emplacement à remplir (figure de gel, graphique, calcul, photo, séquence)
   src/pages/TemplatesPage.jsx  galerie des modèles ; TemplateEditPage.jsx : édition
   src/lib/inventory.js         stockage côté interface (inventory-core.js = copie conforme du serveur, testée)
-  src/components/storage/      labo dessiné, intérieur des appareils, boîte, fiche du tube, encart « Tubes »
+  src/components/storage/      labo dessiné, intérieur des appareils, boîte, fiche du tube, encart « Tubes » ;
+                               cryo.jsx : dewar, canister, puck, boîte ronde, dessin des grilles, criblage
   src/pages/StoragePage.jsx    page Stockage
 deploy/                        service systemd, sauvegarde et son timer
 ```
@@ -410,7 +432,8 @@ deploy/                        service systemd, sauvegarde et son timer
 
 ## Limites connues de la v0.1
 
-- Un seul type de contenu : pas encore de registre (plasmides, souches, protéines) ni d'inventaire.
+- Registre limité aux séquences : pas encore de fiches de souches ou de protéines.
+- Cryo-EM : le criblage et les sessions se notent à la main (pas de lien avec EPU, SerialEM ou cryoSPARC).
 - Pas de liens entre entrées autres que les addenda.
 - Pas de gestion des droits : tout compte connecté voit tout (les invités d'un tableau partagé, eux, ne voient que ce tableau).
 - Tableau partagé : si deux personnes modifient le même post-it au même moment, la dernière modification l'emporte.

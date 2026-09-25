@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildTree, capText, decodeCell, parseBoxGrid, readPasted, tempTheme } from '../src/lib/inventory.js';
+import { buildTree, capText, contentsText, decodeCell, parseBoxGrid, readPasted, tempTheme } from '../src/lib/inventory.js';
 
 test('inventory-core.js est la copie conforme de server/src/lib/inventory.js', () => {
   const client = fs.readFileSync(new URL('../src/lib/inventory-core.js', import.meta.url), 'utf8');
@@ -26,7 +26,7 @@ test('arbre : totaux cumulés (tubes, places, boîtes)', () => {
     { id: 'b2', parent_id: 'f', kind: 'box', rows: 10, cols: 10, count: 5, out: 0 },
     { id: 'g', parent_id: 's', kind: 'bag', count: 3, out: 0 },
   ]);
-  assert.deepEqual(t.totals('f'), { tubes: 18, out: 1, capacity: 181, placed: 15, boxes: 3 });
+  assert.deepEqual(t.totals('f'), { tubes: 18, grids: 0, out: 1, capacity: 181, placed: 15, boxes: 3 });
   assert.deepEqual(t.children('s').map((u) => u.id), ['b1', 'g']);
 });
 
@@ -43,4 +43,12 @@ test('plan de boîte collé depuis Excel : en-têtes reconnus, lignes vides gard
   const box = { rows: 9, cols: 9 };
   assert.deepEqual(readPasted('A1\tpUC19\t250 ng/µL\nC5;GFP', box).map((t) => [t.row, t.col, t.name]), [[0, 0, 'pUC19'], [2, 4, 'GFP']]);
   assert.equal(readPasted('x\ty\n\t\tz', box).length, 3);
+});
+
+test('contenu résumé : tubes et grilles', () => {
+  assert.equal(contentsText({ tubes: 0, grids: 0 }), '0 tube');
+  assert.equal(contentsText({ tubes: 0, grids: 0 }, 'grille'), '0 grille');
+  assert.equal(contentsText({ tubes: 5, grids: 5 }), '5 grilles');
+  assert.equal(contentsText({ tubes: 8, grids: 3 }), '5 tubes · 3 grilles');
+  assert.equal(contentsText({ tubes: 1, grids: 0 }), '1 tube');
 });

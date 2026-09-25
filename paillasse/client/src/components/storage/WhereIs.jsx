@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MapPin, Search } from 'lucide-react';
 import { api } from '../../api.js';
-import { Cap } from './bits.jsx';
+import { SampleIcon } from './cryo.jsx';
 
 /**
  * « Où est… ? » : nom, code ECH-…, plasmide du registre, concentration. Entrée ouvre le premier résultat
@@ -63,7 +63,7 @@ export default function WhereIs({ onFound }) {
           {results.map((s, i) => (
             <li key={s.id} role="option" aria-selected={i === active}>
               <button type="button" className={`whereis-item${i === active ? ' is-active' : ''}`} onMouseEnter={() => setActive(i)} onClick={() => pick(s)}>
-                <Cap sample={s} size={20} />
+                <SampleIcon sample={s} size={20} />
                 <span className="whereis-text">
                   <strong>{s.name}</strong> <span className="muted small">{s.code}{s.status === 'out' ? ' · hors du froid' : ''}</span>
                   <span className="whereis-path">{s.location || 'sans emplacement'}</span>

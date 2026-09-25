@@ -1,6 +1,6 @@
 import {
-  AudioWaveform, Atom, Bug, CircleDot, Container, DoorOpen, Dna, Droplet, Ellipsis, GitFork, Grape, Grid3x3, Layers,
-  LibraryBig, Package, Refrigerator, Rows3, ShoppingBag, Snowflake, TestTube,
+  Aperture, AudioWaveform, Atom, Bug, CircleDot, Container, Cylinder, Disc3, DoorOpen, Dna, Droplet, Ellipsis, GitFork, Grape,
+  Grid2x2, Grid3x3, Layers, LibraryBig, Package, Refrigerator, Rows3, ShoppingBag, Snowflake, TestTube,
 } from 'lucide-react';
 import {
   CAP_HEX, SAMPLE_TYPES, UNIT_KINDS, capColor, capInk, capText, decodeCell, formatTemp, tempTheme,
@@ -8,11 +8,11 @@ import {
 
 export const TYPE_ICONS = {
   plasmid: CircleDot, strain: Bug, cells: Grape, protein: Atom, antibody: GitFork, dna: Dna,
-  rna: AudioWaveform, oligo: Ellipsis, tissue: Droplet, reagent: TestTube, other: Package,
+  rna: AudioWaveform, oligo: Ellipsis, tissue: Droplet, reagent: TestTube, grid: Aperture, other: Package,
 };
 export const KIND_ICONS = {
   room: DoorOpen, freezer: Snowflake, fridge: Refrigerator, tank: Container, cabinet: LibraryBig,
-  shelf: Rows3, rack: Layers, box: Grid3x3, bag: ShoppingBag,
+  shelf: Rows3, rack: Layers, box: Grid3x3, bag: ShoppingBag, canister: Cylinder, puck: Disc3, gridbox: Grid2x2,
 };
 
 // Couleurs de boîtes (carton ou plastique des boîtes de congélation)
@@ -27,7 +27,7 @@ export function TypeIcon({ type, size = 14 }) {
 export const typeLabel = (type) => SAMPLE_TYPES[type]?.label ?? 'Autre';
 export const TYPE_SHORT = {
   plasmid: 'Plasmide', strain: 'Souche', cells: 'Cellules', protein: 'Protéine', antibody: 'Anticorps', dna: 'ADN',
-  rna: 'ARN', oligo: 'Oligo', tissue: 'Tissu, sérum', reagent: 'Réactif', other: 'Autre',
+  rna: 'ARN', oligo: 'Oligo', tissue: 'Tissu, sérum', reagent: 'Réactif', grid: 'Grille', other: 'Autre',
 };
 
 /** Bouchon de tube, vu de dessus. */

@@ -1,7 +1,7 @@
 // Stockage des échantillons, côté interface : règles partagées avec le serveur (inventory-core.js,
 // copie conforme de server/src/lib/inventory.js vérifiée par les tests) et aides d'affichage.
 export * from './inventory-core.js';
-import { CAP_COLORS, SAMPLE_TYPES, UNIT_KINDS, parsePos } from './inventory-core.js';
+import { CAP_COLORS, SAMPLE_TYPES, SLOTTED, UNIT_KINDS, hasPositions, parsePos } from './inventory-core.js';
 
 // Teintes des bouchons, proches des inserts de couleur des cryotubes
 export const CAP_HEX = {
@@ -43,18 +43,21 @@ export function buildTree(units) {
     if (!children.has(key)) children.set(key, []);
     children.get(key).push(u);
   }
+  // Pucks et boîtes à grilles : dans l'ordre de leurs cases
+  for (const list of children.values()) if (list.some((u) => SLOTTED.includes(u.kind))) list.sort((a, b) => (a.slot ?? 99) - (b.slot ?? 99));
   const totals = new Map();
   const walk = (u) => {
-    const t = { tubes: u.count ?? 0, out: u.out ?? 0, capacity: u.kind === 'box' ? u.rows * u.cols : 0, placed: u.kind === 'box' ? u.count ?? 0 : 0, boxes: u.kind === 'box' || u.kind === 'bag' ? 1 : 0 };
+    const pos = hasPositions(u);
+    const t = { tubes: u.count ?? 0, grids: u.grids ?? 0, out: u.out ?? 0, capacity: pos ? u.rows * u.cols : 0, placed: pos ? u.count ?? 0 : 0, boxes: pos || u.kind === 'bag' ? 1 : 0 };
     for (const c of children.get(u.id) ?? []) {
       const ct = walk(c);
-      t.tubes += ct.tubes; t.out += ct.out; t.capacity += ct.capacity; t.placed += ct.placed; t.boxes += ct.boxes;
+      for (const k of Object.keys(t)) t[k] += ct[k];
     }
     totals.set(u.id, t);
     return t;
   };
   for (const u of children.get(null) ?? []) walk(u);
-  return { byId, children: (id) => children.get(id ?? null) ?? [], totals: (id) => totals.get(id) ?? { tubes: 0, out: 0, capacity: 0, placed: 0, boxes: 0 } };
+  return { byId, children: (id) => children.get(id ?? null) ?? [], totals: (id) => totals.get(id) ?? { tubes: 0, grids: 0, out: 0, capacity: 0, placed: 0, boxes: 0 } };
 }
 
 export const isAppliance = (u) => Boolean(UNIT_KINDS[u?.kind]?.appliance);
@@ -113,4 +116,14 @@ export function readPasted(text, box) {
   const out = [];
   grid.forEach((row, r) => row.forEach((name, c) => { if (name) out.push({ row: r, col: c, name }); }));
   return out.map((t) => ({ ...t, outside: t.row >= box.rows || t.col >= box.cols }));
+}
+
+/** « 12 tubes », « 8 grilles », « 3 tubes · 8 grilles » */
+export function contentsText(t, empty = 'tube') {
+  const tubes = t.tubes - (t.grids ?? 0);
+  if (!tubes && !t.grids) return `0 ${empty}`;
+  const parts = [];
+  if (tubes) parts.push(`${tubes} tube${tubes > 1 ? 's' : ''}`);
+  if (t.grids) parts.push(`${t.grids} grille${t.grids > 1 ? 's' : ''}`);
+  return parts.join(' · ');
 }

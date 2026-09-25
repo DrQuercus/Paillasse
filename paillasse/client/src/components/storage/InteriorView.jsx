@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Pencil, Plus, ShoppingBag } from 'lucide-react';
 import { api } from '../../api.js';
 import { useApp } from '../../context.js';
-import { UNIT_KINDS, canContain, tempTheme } from '../../lib/inventory.js';
+import { UNIT_KINDS, canContain, contentsText, tempTheme } from '../../lib/inventory.js';
 import ApplianceArt from './ApplianceArt.jsx';
 import { ApplianceCard } from './LabView.jsx';
+import { DewarTop } from './cryo.jsx';
 import { FillBar, KIND_ICONS, MiniMap, TempChip, boxColor, kindLabel } from './bits.jsx';
 
 const DRAG_TYPE = 'application/x-paillasse-unit';
@@ -126,7 +127,7 @@ function ShelfBand({ shelf, tree, onOpen, onCreate, onEdit, onMoved }) {
     <section className={`shelf-band${drop.over ? ' is-drop' : ''}`} {...drop.props}>
       <header className="shelf-head">
         <button type="button" className="link-btn" onClick={() => onOpen(shelf)}>{shelf.name}</button>
-        <span className="muted small">{t.boxes} boîte{t.boxes > 1 ? 's' : ''} · {t.tubes} tube{t.tubes > 1 ? 's' : ''}</span>
+        <span className="muted small">{t.boxes} boîte{t.boxes > 1 ? 's' : ''} · {contentsText(t)}</span>
         <button type="button" className="icon-btn" onClick={() => onEdit(shelf)} aria-label={`Modifier ${shelf.name}`} title="Modifier l’étagère"><Pencil size={13} /></button>
       </header>
       <div className="shelf-items">
@@ -157,7 +158,7 @@ export default function InteriorView({ unit, tree, onOpen, onCreate, onEdit, onM
       <div className="interior theme-ambient">
         <header className="interior-head">
           <Icon size={20} aria-hidden="true" /><h2>{unit.name}</h2>
-          <span className="muted">{t.tubes} tubes</span>
+          <span className="muted">{contentsText(t)}</span>
           <button type="button" className="btn btn-small" onClick={() => onEdit(unit)}><Pencil size={13} /> Modifier</button>
         </header>
         <ul className="appl-grid">
@@ -169,7 +170,8 @@ export default function InteriorView({ unit, tree, onOpen, onCreate, onEdit, onM
   }
 
   const shelves = children.filter((c) => c.kind === 'shelf');
-  const loose = children.filter((c) => c.kind !== 'shelf');
+  const canisters = children.filter((c) => c.kind === 'canister');
+  const loose = children.filter((c) => c.kind !== 'shelf' && c.kind !== 'canister');
   return (
     <div className={`interior theme-${theme}${appliance ? ' is-appliance' : ''}`}>
       {appliance && (
@@ -182,11 +184,13 @@ export default function InteriorView({ unit, tree, onOpen, onCreate, onEdit, onM
           <Icon size={20} aria-hidden="true" />
           <h2>{unit.name}</h2>
           <TempChip unit={applianceOf} />
-          <span className="muted">{t.boxes} boîte{t.boxes > 1 ? 's' : ''} · {t.tubes} tube{t.tubes > 1 ? 's' : ''}</span>
+          <span className="muted">{t.boxes} boîte{t.boxes > 1 ? 's' : ''} · {contentsText(t, canisters.length ? 'grille' : 'tube')}</span>
           {t.capacity > 0 && <FillBar used={t.placed} capacity={t.capacity} />}
           <button type="button" className="btn btn-small" onClick={() => onEdit(unit)}><Pencil size={13} /> Modifier</button>
         </header>
         {unit.notes && <p className="hint interior-notes">{unit.notes}</p>}
+        {canisters.length > 0 && <DewarTop unit={unit} tree={tree} onOpen={onOpen} />}
+        {(canisters.length === 0 || loose.length > 0) && (
         <div className={`interior-inside kind-${unit.kind}${drop.over ? ' is-drop' : ''}`} {...drop.props}>
           {shelves.map((s) => <ShelfBand key={s.id} shelf={s} tree={tree} onOpen={onOpen} onCreate={onCreate} onEdit={onEdit} onMoved={onMoved} />)}
           {(loose.length > 0 || !shelves.length) && (
@@ -199,10 +203,11 @@ export default function InteriorView({ unit, tree, onOpen, onCreate, onEdit, onM
             </section>
           )}
         </div>
+        )}
         <div className="interior-add">
           {UNIT_KINDS[unit.kind].children.includes('shelf') && <AddTile label="Étagère" onClick={() => onCreate({ kind: 'shelf', parent: unit })} />}
           <AddButtons parent={unit} onCreate={onCreate} />
-          <span className="hint">Glissez une boîte ou un rack pour le changer de place.</span>
+          <span className="hint">{canisters.length ? 'Cliquez un canister pour voir ses pucks.' : 'Glissez une boîte ou un rack pour le changer de place.'}</span>
         </div>
       </div>
     </div>

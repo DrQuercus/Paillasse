@@ -2,18 +2,22 @@ import { useMemo, useState } from 'react';
 import { Archive } from 'lucide-react';
 import { api } from '../../api.js';
 import { useApp } from '../../context.js';
-import { UNIT_KINDS, canContain, formatTemp, locationText, quickLayout, unitPath } from '../../lib/inventory.js';
+import {
+  CAPACITY, GRIDBOX_FORMATS, NUMBERED, SLOTTED, UNIT_KINDS, canContain, formatTemp, locationText, quickLayout, unitLabel, unitPath,
+} from '../../lib/inventory.js';
 import Modal from '../Modal.jsx';
 import { Segmented } from '../calc/fields.jsx';
 import ApplianceArt from './ApplianceArt.jsx';
 import { BOX_COLORS, KIND_ICONS, kindLabel } from './bits.jsx';
+import { gridboxSpots } from './cryo.jsx';
 
 // Appareils proposés à la création, avec leur réglage d'usine
 export const APPLIANCE_PRESETS = [
   { key: 'm80', kind: 'freezer', temperature: -80, style: 'upright', label: 'Congélateur −80 °C', layout: { shelves: 5, racks: 4, boxes: 5 } },
   { key: 'm20', kind: 'freezer', temperature: -20, style: 'upright', label: 'Congélateur −20 °C', layout: { shelves: 4, racks: 0, boxes: 6 } },
   { key: 'p4', kind: 'fridge', temperature: 4, style: '', label: 'Réfrigérateur +4 °C', layout: { shelves: 4, racks: 0, boxes: 4 } },
-  { key: 'ln2', kind: 'tank', temperature: -196, style: '', label: 'Cuve d’azote liquide', layout: { shelves: 0, racks: 6, boxes: 10, rows: 10, cols: 10 } },
+  { key: 'cryoem', kind: 'tank', temperature: -196, style: '', label: 'Dewar cryo-EM (grilles)', layout: { canisters: 6, pucks: 5, firstPuck: 1 } },
+  { key: 'ln2', kind: 'tank', temperature: -196, style: '', label: 'Cuve d’azote (cryotubes)', layout: { shelves: 0, racks: 6, boxes: 10, rows: 10, cols: 10 } },
   { key: 'amb', kind: 'cabinet', temperature: 20, style: '', label: 'Armoire (ambiant)', layout: { shelves: 4, racks: 0, boxes: 0 } },
 ];
 
@@ -21,8 +25,16 @@ const BOX_SIZES = [['9x9', '9 × 9 (81)'], ['10x10', '10 × 10 (100)'], ['5x5', 
 
 const num = (v) => Math.max(0, Math.trunc(Number(v)) || 0);
 
-/** Nom proposé pour un nouveau contenant : « Étagère 3 », « Rack C », « Boîte 7 »… */
-export function defaultName(kind, siblings, parentKind) {
+/** Prochain numéro libre : canisters parmi leurs voisins, pucks et boîtes à grilles dans tout le stockage. */
+function nextNumber(list) {
+  const nums = list.map((u) => Number(u.name)).filter(Number.isInteger);
+  return String(nums.length ? Math.max(...nums) + 1 : 1);
+}
+
+/** Nom proposé pour un nouveau contenant : « Étagère 3 », « Rack C », « Boîte 7 », numéro de puck… */
+export function defaultName(kind, siblings, parentKind, all = []) {
+  if (kind === 'canister') return nextNumber(siblings.filter((s) => s.kind === 'canister'));
+  if (kind === 'puck' || kind === 'gridbox') return nextNumber(all.filter((u) => u.kind === kind));
   const n = siblings.filter((s) => s.kind === kind).length + 1;
   if (kind === 'rack') return `${kindLabel('rack', parentKind)} ${String.fromCharCode(64 + Math.min(26, n))}`;
   if (kind === 'shelf') return `Étagère ${n}`;
@@ -45,21 +57,36 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
   const [preset, setPreset] = useState(initialPreset);
   const kind = editing ? unit.kind : create?.kind ?? preset?.kind;
   const appliance = UNIT_KINDS[kind]?.appliance;
-  const [name, setName] = useState(() => (editing ? unit.name : initialPreset?.label ?? defaultName(kind, siblings, parent?.kind)));
+  const [name, setName] = useState(() => (editing ? unit.name : initialPreset?.label ?? defaultName(kind, siblings, parent?.kind, [...tree.byId.values()])));
+  const [format, setFormat] = useState(editing ? unit.format || 'g4' : 'g4');
+  const [capacity, setCapacity] = useState(editing ? String(unit.capacity ?? '') : String(CAPACITY[kind]?.default ?? ''));
+  const numbered = NUMBERED.includes(kind);
+  const slotted = SLOTTED.includes(kind);
   const [temperature, setTemperature] = useState(editing ? String(unit.temperature ?? '') : String(preset?.temperature ?? UNIT_KINDS[kind]?.temperature ?? ''));
   const [style, setStyle] = useState(editing ? unit.style || 'upright' : preset?.style || 'upright');
   const [size, setSize] = useState(editing && unit.kind === 'box' ? `${unit.rows}x${unit.cols}` : preset?.layout?.rows === 10 ? '10x10' : '9x9');
   const [color, setColor] = useState(editing ? unit.color : '');
   const [notes, setNotes] = useState(editing ? unit.notes : '');
   const [parentId, setParentId] = useState(editing ? unit.parent_id ?? '' : '');
-  const [layout, setLayout] = useState(() => ({ ...(preset?.layout ?? {}) }));
+  // Case dans le parent (niveau d'un canister, case d'un puck) : libre, ou celle du contenant lui-même
+  const slotParent = tree.byId.get(editing ? parentId : parent?.id) ?? null;
+  const freeSlots = useMemo(() => {
+    if (!slotted || !slotParent) return [];
+    const taken = new Map(tree.children(slotParent.id).filter((u) => u.slot != null).map((u) => [u.slot, u]));
+    return Array.from({ length: slotParent.capacity ?? 0 }, (_, i) => i + 1).map((k) => ({ slot: k, by: taken.get(k) }))
+      .filter((x) => !x.by || x.by.id === unit?.id || editing);
+  }, [slotted, slotParent, tree, unit, editing]);
+  const [slot, setSlot] = useState(() => String(editing ? unit.slot ?? '' : create?.slot ?? ''));
+  // Pucks numérotés à la suite de ceux déjà rangés dans le labo
+  const withPuckNumbers = (l) => (l?.firstPuck !== undefined ? { ...l, firstPuck: Number(nextNumber([...tree.byId.values()].filter((u) => u.kind === 'puck'))) } : { ...l });
+  const [layout, setLayout] = useState(() => withPuckNumbers(preset?.layout ?? {}));
   const [busy, setBusy] = useState(false);
 
   const choosePreset = (p) => {
     setPreset(p);
     setTemperature(String(p.temperature));
     setStyle(p.style || 'upright');
-    setLayout({ ...p.layout });
+    setLayout(withPuckNumbers(p.layout));
     setSize(p.layout?.rows === 10 ? '10x10' : '9x9');
     if (!name || APPLIANCE_PRESETS.some((q) => q.label === name)) setName(p.label);
   };
@@ -84,9 +111,13 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
       const body = { name, notes, color };
       if (appliance) Object.assign(body, { temperature, style: kind === 'freezer' ? style : '' });
       if (kind === 'box') Object.assign(body, { rows, cols });
+      if (kind === 'gridbox') body.format = format;
+      if (CAPACITY[kind]) body.capacity = capacity;
+      if (slotted && slot) body.slot = Number(slot);
       let saved;
       if (editing) {
         if (canContain(null, unit.kind) || parentId) body.parent_id = parentId || null;
+        if (slotted && parentId !== unit.parent_id && !slot) body.slot = null;
         saved = await api.put(`/inventory/units/${unit.id}`, body);
       } else {
         saved = await api.post('/inventory/units', { ...body, kind, parent_id: parent?.id ?? null, ...(appliance && plan.length ? { layout: { ...layout, rows, cols } } : {}) });
@@ -99,7 +130,7 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
   };
 
   const archive = async () => {
-    if (!window.confirm(`Retirer « ${unit.name} » ? Il doit être vide. On le retrouve dans l’historique des tubes qui y ont été rangés.`)) return;
+    if (!window.confirm(`Retirer « ${unitLabel(unit)} » ? Il doit être vide. On le retrouve dans l’historique des tubes qui y ont été rangés.`)) return;
     try {
       await api.post(`/inventory/units/${unit.id}/archive`);
       onArchived?.(unit);
@@ -109,7 +140,10 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
   };
 
   const Icon = KIND_ICONS[kind];
-  const title = editing ? `Modifier : ${unit.name}` : appliance || !kind ? 'Nouvel appareil' : `Nouveau : ${kindLabel(kind, parent?.kind).toLowerCase()}`;
+  const NEW_TITLES = { canister: 'Nouveau canister', puck: 'Nouveau puck', gridbox: 'Nouvelle boîte à grilles' };
+  const title = editing ? `Modifier : ${unitLabel(unit)}` : appliance || !kind ? 'Nouvel appareil' : NEW_TITLES[kind] ?? `Nouveau : ${kindLabel(kind, parent?.kind).toLowerCase()}`;
+  const cryoLayout = appliance && kind === 'tank' && layout.canisters !== undefined;
+  const planPucks = plan.filter((p) => p.kind === 'puck').length;
   const setL = (k) => (e) => setLayout((l) => ({ ...l, [k]: num(e.target.value) }));
 
   return (
@@ -120,7 +154,10 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
       footer={(
         <>
           {editing && <button type="button" className="btn btn-ghost" onClick={archive}><Archive size={15} /> Retirer</button>}
-          <span className="modal-foot-note">{!editing && planBoxes > 0 ? `${plan.length} contenants créés d’un coup, dont ${planBoxes} boîtes (${planBoxes * rows * cols} places).` : ''}</span>
+          <span className="modal-foot-note">
+            {!editing && planBoxes > 0 ? `${plan.length} contenants créés d’un coup, dont ${planBoxes} boîtes (${planBoxes * rows * cols} places).` : ''}
+            {!editing && planPucks > 0 ? `${plan.length - planPucks} canisters et ${planPucks} pucks (n° ${plan.find((p) => p.kind === 'puck').name} à ${plan.filter((p) => p.kind === 'puck').at(-1).name}).` : ''}
+          </span>
           <button type="button" className="btn" onClick={onClose}>Annuler</button>
           <button type="submit" form="unit-form" className="btn btn-primary" disabled={busy || !name.trim()}>{editing ? 'Enregistrer' : 'Créer'}</button>
         </>
@@ -139,9 +176,24 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
         )}
         <div className="field-row">
           <label className="field">
-            <span>{Icon && <Icon size={13} aria-hidden="true" />} Nom</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={appliance ? 'ex. Thor, −80 du couloir' : kind === 'room' ? 'ex. Salle 204, pièce culture' : ''} autoFocus />
+            <span>{Icon && <Icon size={13} aria-hidden="true" />} {numbered ? 'Numéro ou annotation' : 'Nom'}</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={appliance ? 'ex. Thor, −80 du couloir' : kind === 'room' ? 'ex. Salle 204, pièce culture' : kind === 'gridbox' ? 'ex. 37, apoferritine 12/09' : ''} autoFocus />
           </label>
+          {CAPACITY[kind] && (
+            <label className="field">
+              <span>{kind === 'canister' ? 'Niveaux (pucks)' : 'Cases (boîtes)'}</span>
+              <input type="number" min="1" max={CAPACITY[kind].max} value={capacity} onChange={(e) => setCapacity(e.target.value)} />
+            </label>
+          )}
+          {slotted && freeSlots.length > 0 && (
+            <label className="field">
+              <span>{kind === 'puck' ? `Niveau dans le canister ${slotParent?.name}` : `Case dans le puck ${slotParent?.name}`}</span>
+              <select value={slot} onChange={(e) => setSlot(e.target.value)}>
+                <option value="">{editing ? '—' : 'première libre'}</option>
+                {freeSlots.map((x) => <option key={x.slot} value={x.slot}>{x.slot}{x.by && x.by.id !== unit?.id ? ` (échange avec ${unitLabel(x.by)})` : ''}</option>)}
+              </select>
+            </label>
+          )}
           {appliance && (
             <label className="field">
               <span>Température (°C)</span>
@@ -150,6 +202,36 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
           )}
         </div>
         {kind === 'freezer' && <Segmented label="Forme" value={style} onChange={setStyle} options={[['upright', 'Armoire (porte)'], ['chest', 'Coffre (couvercle)']]} />}
+        {kind === 'gridbox' && (
+          <>
+            <div className="field">
+              <span>Type de boîte</span>
+              <div className="format-picker" role="radiogroup" aria-label="Type de boîte à grilles">
+                {Object.entries(GRIDBOX_FORMATS).map(([k, f]) => (
+                  <button key={k} type="button" role="radio" aria-checked={format === k} className={`format-card${format === k ? ' is-selected' : ''}`} onClick={() => setFormat(k)}>
+                    <svg viewBox="0 0 100 100" width="54" height="54" aria-hidden="true">
+                      <circle cx="50" cy="50" r="47" className="fmt-box" />
+                      {gridboxSpots(k).map((p, i) => (p.clipped ? (
+                        <g key={i}><circle cx={p.x} cy={p.y} r={p.size / 2.2} className="fmt-clip" /><circle cx={p.x} cy={p.y} r={p.size / 3.3} className="fmt-grid" /></g>
+                      ) : <circle key={i} cx={p.x} cy={p.y} r={p.size / 2.6} className="fmt-grid" />))}
+                      <circle cx="50" cy="50" r="6" className="fmt-hub" />
+                    </svg>
+                    <span>{f.label}</span>
+                  </button>
+                ))}
+              </div>
+              {editing && <small className="hint">Changer de type n’est possible que si aucune grille n’en sort.</small>}
+            </div>
+            <div className="field">
+              <span>Couleur de la boîte</span>
+              <div className="swatches">
+                {BOX_COLORS.map((c) => (
+                  <button key={c} type="button" className={`swatch${(color || BOX_COLORS[0]) === c ? ' is-active' : ''}`} style={{ background: c }} onClick={() => setColor(c)} aria-label={`Couleur ${c}`} aria-pressed={(color || BOX_COLORS[0]) === c} />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
         {kind === 'box' && (
           <>
             <div className="field">
@@ -167,7 +249,26 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
             </div>
           </>
         )}
-        {appliance && !editing && (
+        {cryoLayout && !editing && (
+          <fieldset className="field layout-box">
+            <legend>Canisters et pucks (facultatif)</legend>
+            <div className="layout-inputs">
+              <label><input type="number" min="0" max="30" value={layout.canisters ?? 0} onChange={setL('canisters')} /> canisters</label>
+              <label><input type="number" min="0" max="30" value={layout.pucks ?? 0} onChange={setL('pucks')} /> pucks par canister</label>
+              <label>puck n° <input type="number" min="1" value={layout.firstPuck ?? 1} onChange={setL('firstPuck')} /> pour le premier</label>
+            </div>
+            <div className="cryo-preview" aria-hidden="true">
+              {plan.filter((p) => p.kind === 'canister').slice(0, 12).map((c) => (
+                <span key={c.key} className="cp-can">
+                  <strong>{c.name}</strong>
+                  {plan.filter((p) => p.parentKey === c.key).map((p) => <span key={p.key} className="cp-puck">{p.name}</span>)}
+                </span>
+              ))}
+            </div>
+            <small className="hint">Canisters numérotés 1, 2, 3… ; pucks numérotés à la suite, niveau 1 en haut. Les boîtes à grilles s’ajoutent ensuite, case par case.</small>
+          </fieldset>
+        )}
+        {appliance && !editing && !cryoLayout && (
           <fieldset className="field layout-box">
             <legend>Aménagement rapide (facultatif)</legend>
             <div className="layout-inputs">

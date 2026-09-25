@@ -4,12 +4,15 @@ import {
 } from 'lucide-react';
 import { api } from '../../api.js';
 import { useApp } from '../../context.js';
-import { SAMPLE_TYPES, freePositions, posLabel, rowLetter } from '../../lib/inventory.js';
+import {
+  GRIDBOX_FORMATS, GRID_SCREENING, SAMPLE_TYPES, freePositions, hasPositions, isClippedPosition, positionLabel, rowLetter, unitLabel,
+} from '../../lib/inventory.js';
 import BoxPicker from './BoxPicker.jsx';
 import PasteDialog from './PasteDialog.jsx';
 import SampleForm from './SampleForm.jsx';
 import { BulkPanel, SamplePanel } from './SamplePanel.jsx';
 import { Cap, FillBar, TYPE_SHORT, TypeIcon, boxColor } from './bits.jsx';
+import { GridDisc, SCREENING_COLORS, gridboxSpots } from './cryo.jsx';
 
 // Tube en cours de glissement (dataTransfer n'est pas lisible pendant le survol)
 let draggedSample = null;
@@ -21,9 +24,16 @@ const MESSAGES = {
   discard: (n) => (n > 1 ? `${n} tubes retirés : leurs places sont libres.` : 'Tube retiré : sa place est libre.'),
   color: () => 'Bouchons recolorés.',
 };
+// Les mêmes gestes, pour des grilles de cryo-EM
+const GRID_MESSAGES = {
+  out: (n) => `${n > 1 ? `${n} grilles parties` : 'Grille partie'} au microscope : ${n > 1 ? 'leurs places les attendent' : 'sa place l’attend'}.`,
+  back: (n) => (n > 1 ? `${n} grilles revenues dans leur boîte.` : 'Grille revenue dans sa boîte.'),
+  discard: (n) => (n > 1 ? `${n} grilles retirées.` : 'Grille retirée : sa place est libre.'),
+};
 
 /** Infos de la boîte quand rien n'est choisi : remplissage, légende (qui filtre), mode d'emploi. */
 function BoxSummary({ unit, samples, free, typeFilter, onType }) {
+  if (unit.kind === 'gridbox') return <GridBoxSummary unit={unit} samples={samples} free={free} filter={typeFilter} onFilter={onType} />;
   const byType = Object.keys(SAMPLE_TYPES).map((t) => [t, samples.filter((s) => s.type === t)]).filter(([, l]) => l.length);
   const out = samples.filter((s) => s.status === 'out');
   return (
@@ -55,13 +65,48 @@ function BoxSummary({ unit, samples, free, typeFilter, onType }) {
   );
 }
 
+/** Boîte à grilles, rien de choisi : remplissage, criblage (qui filtre), mode d'emploi. */
+function GridBoxSummary({ unit, samples, free, filter, onFilter }) {
+  const screening = (s) => s.details?.screening ?? 'todo';
+  const byStatus = Object.keys(GRID_SCREENING).map((k) => [k, samples.filter((s) => screening(s) === k)]).filter(([, l]) => l.length);
+  const out = samples.filter((s) => s.status === 'out');
+  return (
+    <div className="box-summary">
+      <p className="box-fill">
+        <strong>{samples.length}</strong> / {unit.cols} grilles{unit.format !== 'g12' ? ` · ${GRIDBOX_FORMATS[unit.format]?.label}` : ''}
+        <FillBar used={samples.length} capacity={unit.cols} />
+      </p>
+      {out.length > 0 && <p className="out-note">{out.length} grille{out.length > 1 ? 's' : ''} au microscope (cercle en pointillé).</p>}
+      {byStatus.length > 0 && (
+        <div className="legend" role="group" aria-label="Filtrer par criblage">
+          {byStatus.map(([k, list]) => (
+            <button key={k} type="button" className={`legend-item${filter === k ? ' is-active' : ''}`} aria-pressed={filter === k} onClick={() => onFilter(filter === k ? '' : k)}>
+              <span className="screen-dot" style={{ '--sc': SCREENING_COLORS[k] }} aria-hidden="true" /> {GRID_SCREENING[k]} <span className="muted">{list.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <ul className="box-tips">
+        <li><strong>Position vide</strong> : ranger une ou plusieurs grilles, avec leurs conditions.</li>
+        <li><strong>Grille</strong> : sa fiche et son criblage ; <strong>glissez-la</strong> vers une autre position.</li>
+        {unit.format === 'g4c4' && <li><strong>C1–C4</strong> : grilles clippées ; <strong>N1–N4</strong> : non clippées.</li>}
+        <li>Le <strong>repère</strong> en haut de la boîte marque la position 1.</li>
+      </ul>
+      {free === 0 && <p className="out-note">Boîte pleine.</p>}
+    </div>
+  );
+}
+
 /**
  * Une boîte (grille de positions) ou un sac, et le panneau du tube choisi.
  * focus : tube à montrer (recherche « Où est… ? »).
  */
 export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
   const { notify } = useApp();
-  const grid = unit.kind === 'box';
+  const grid = hasPositions(unit);
+  const round = unit.kind === 'gridbox';
+  const P = (r, c) => positionLabel(unit, r, c);
+  const noun = round ? { one: 'grille', many: 'grilles', One: 'Grille' } : { one: 'tube', many: 'tubes', One: 'Tube' };
   const [samples, setSamples] = useState(null);
   const [sel, setSel] = useState([]);
   const [anchor, setAnchor] = useState(null);
@@ -77,6 +122,7 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
   const [panelVersion, setPanelVersion] = useState(0);
   const [focusIdx, setFocusIdx] = useState(0);
   const [cellSize, setCellSize] = useState(46);
+  const [boxSize, setBoxSize] = useState(420);
   const cellRefs = useRef(new Map());
   const wrap = useRef(null);
 
@@ -95,6 +141,7 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
     const fit = () => {
       const w = wrap.current?.clientWidth ?? 600;
       setCellSize(Math.max(26, Math.min(60, Math.floor((w - 64) / unit.cols))));
+      setBoxSize(Math.max(240, Math.min(470, w - 40)));
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -127,7 +174,7 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
       await api.post('/inventory/samples/action', { ids, action: act, ...extra });
       if (act === 'discard') setSel([]);
       await refresh();
-      notify(MESSAGES[act]?.(ids.length) ?? 'C’est fait.', 'success');
+      notify((round && GRID_MESSAGES[act] ? GRID_MESSAGES[act] : MESSAGES[act])?.(ids.length) ?? 'C’est fait.', 'success');
     } catch (err) {
       notify(err.message, 'error');
     }
@@ -182,7 +229,7 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
       setGhost([]);
       setSel(made.length === 1 ? [made[0].id] : []);
       await refresh();
-      notify(`${made.length > 1 ? `${made.length} tubes rangés` : 'Tube rangé'}${grid ? ` : ${made.map((m) => posLabel(m.row, m.col)).join(', ')}` : ''}.`, 'success');
+      notify(`${made.length > 1 ? `${made.length} ${noun.many} rangé${round ? 'e' : ''}s` : `${noun.One} rangé${round ? 'e' : ''}`}${grid ? ` : ${made.map((m) => P(m.row, m.col)).join(', ')}` : ''}.`, 'success');
     } catch (err) {
       notify(err.message, 'error');
     }
@@ -193,7 +240,7 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
       await api.put(`/inventory/samples/${mode.sample.id}`, fields);
       setMode(null);
       await refresh();
-      notify('Tube modifié.', 'success');
+      notify(`${noun.One} modifié${round ? 'e' : ''}.`, 'success');
     } catch (err) {
       notify(err.message, 'error');
     }
@@ -210,13 +257,13 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
     const other = at.get(`${row},${col}`);
     const moves = [{ id: s.id, unit_id: unit.id, row, col }];
     if (other) moves.push({ id: other.id, unit_id: unit.id, row: s.row, col: s.col });
-    move(moves, other ? `${posLabel(s.row, s.col)} ⇄ ${posLabel(row, col)} : tubes échangés.` : `${s.name} : ${posLabel(s.row, s.col)} → ${posLabel(row, col)}.`);
+    move(moves, other ? `${P(s.row, s.col)} ⇄ ${P(row, col)} : ${noun.many} échangé${round ? 'e' : ''}s.` : `${s.name} : ${P(s.row, s.col)} → ${P(row, col)}.`);
     setSel([s.id]);
   };
 
   const onKey = (e, idx) => {
     const { rows, cols } = unit;
-    const moves = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols };
+    const moves = round ? { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 } : { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols };
     if (moves[e.key]) {
       e.preventDefault();
       const next = Math.max(0, Math.min(rows * cols - 1, idx + moves[e.key]));
@@ -232,13 +279,14 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
   if (!samples) return <div className="box-view" aria-busy="true" />;
 
   const tubeTitle = (s) => [
-    `${posLabel(s.row, s.col)} · ${s.name} (${s.code})`,
-    SAMPLE_TYPES[s.type]?.label,
-    [s.concentration, s.volume].filter(Boolean).join(' · '),
-    s.status === 'out' ? 'Hors du froid' : '',
+    `${P(s.row, s.col)} · ${s.name} (${s.code})`,
+    round ? s.details?.support : SAMPLE_TYPES[s.type]?.label,
+    round ? GRID_SCREENING[s.details?.screening ?? 'todo'] : [s.concentration, s.volume].filter(Boolean).join(' · '),
+    s.status === 'out' ? (round ? 'Au microscope' : 'Hors du froid') : '',
   ].filter(Boolean).join('\n');
+  const dimmed = (s) => Boolean(typeFilter) && (round ? (s.details?.screening ?? 'todo') !== typeFilter : s.type !== typeFilter);
 
-  const renderCell = (r, c) => {
+  const renderCell = (r, c, spot = null) => {
     const key = `${r},${c}`;
     const s = at.get(key);
     const idx = r * unit.cols + c;
@@ -249,7 +297,9 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
       s && sel.includes(s.id) ? 'is-selected' : '',
       s && found === s.id ? 'is-found' : '',
       s && landed.has(s.id) ? 'is-landed' : '',
-      s && typeFilter && s.type !== typeFilter ? 'is-dim' : '',
+      s && dimmed(s) ? 'is-dim' : '',
+      spot ? 'gcell' : '',
+      spot?.clipped ? 'is-clip' : '',
       !s && cell?.row === r && cell?.col === c ? 'is-target' : '',
       g ? 'is-ghost' : '',
       dropAt === key ? 'is-drop' : '',
@@ -270,11 +320,15 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
         onDragOver={(e) => { if (draggedSample) { e.preventDefault(); if (dropAt !== key) setDropAt(key); } }}
         onDragLeave={() => { if (dropAt === key) setDropAt(null); }}
         onDrop={(e) => { e.preventDefault(); drop(r, c); }}
-        aria-label={s ? `${posLabel(r, c)} : ${s.name}, ${s.code}${s.status === 'out' ? ', hors du froid' : ''}` : `${posLabel(r, c)} : libre`}
+        aria-label={s ? `${P(r, c)} : ${s.name}, ${s.code}${s.status === 'out' ? (round ? ', au microscope' : ', hors du froid') : ''}` : `${P(r, c)} : libre`}
         aria-pressed={s ? sel.includes(s.id) : undefined}
-        title={s ? tubeTitle(s) : `${posLabel(r, c)} : libre, cliquer pour ranger ici`}
+        title={s ? tubeTitle(s) : `${P(r, c)} : libre, cliquer pour ranger ici`}
+        style={spot ? { left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.size}%` } : undefined}
       >
-        {s ? <Cap sample={s} label={cellSize >= 34} className={s.status === 'out' ? 'is-out' : ''} size="82%" /> : g ? <span className="ghost-cap">{g}</span> : <span className="hole" />}
+        {spot
+          ? (s ? <GridDisc sample={s} clipped={isClippedPosition(unit, c)} out={s.status === 'out'} /> : g ? <span className="ghost-cap">{g}</span> : <span className="hole" />)
+          : (s ? <Cap sample={s} label={cellSize >= 34} className={s.status === 'out' ? 'is-out' : ''} size="82%" /> : g ? <span className="ghost-cap">{g}</span> : <span className="hole" />)}
+        {spot && <span className={`gpos${spot.lab ? ' is-in' : ''}`} style={spot.lab ? { left: `${spot.lab.x}%`, top: `${spot.lab.y}%` } : undefined}>{P(r, c)}</span>}
       </button>
     );
   };
@@ -287,23 +341,33 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
     } : {};
     panel = (
       <div className="sample-card">
-        <h3 className="panel-title"><PackagePlus size={17} aria-hidden="true" /> {grid ? `Ranger à partir de ${posLabel(cell?.row, cell?.col)}` : `Ranger dans « ${unit.name} »`}</h3>
-        <SampleForm key={`${mode.kind}-${cell?.row}-${cell?.col}`} create initial={base} start={cell} free={free} bag={!grid} onPreview={onPreview} onSubmit={create} onCancel={() => { setMode(null); setCell(null); setGhost([]); }} />
+        <h3 className="panel-title"><PackagePlus size={17} aria-hidden="true" /> {grid ? `Ranger ${round ? 'des grilles' : ''} à partir de ${P(cell?.row, cell?.col)}` : `Ranger dans « ${unit.name} »`}</h3>
+        <SampleForm key={`${mode.kind}-${cell?.row}-${cell?.col}`} create initial={round ? { ...base, type: 'grid', details: mode.sample?.details } : base} start={cell} free={free} bag={!grid} box={unit} occupied={occupied} onStart={(p) => setCell(p)} onPreview={onPreview} onSubmit={create} onCancel={() => { setMode(null); setCell(null); setGhost([]); }} />
       </div>
     );
   } else if (mode?.kind === 'edit') {
     panel = (
       <div className="sample-card">
         <h3 className="panel-title"><Pencil size={16} aria-hidden="true" /> Modifier {mode.sample.code}</h3>
-        <SampleForm key={mode.sample.id} initial={{ ...mode.sample, project_id: mode.sample.project_id ?? '', sequence_id: mode.sample.sequence_id ?? '', expires_on: mode.sample.expires_on ?? '', frozen_on: mode.sample.frozen_on ?? '' }} onSubmit={save} onCancel={() => setMode(null)} />
+        <SampleForm key={mode.sample.id} box={unit} initial={{ ...mode.sample, project_id: mode.sample.project_id ?? '', sequence_id: mode.sample.sequence_id ?? '', expires_on: mode.sample.expires_on ?? '', frozen_on: mode.sample.frozen_on ?? '' }} onSubmit={save} onCancel={() => setMode(null)} />
       </div>
     );
   } else if (selected.length === 1) {
     panel = (
       <SamplePanel
         sampleId={selected[0].id}
+        unit={unit}
         version={panelVersion}
         onAction={action}
+        onScreen={async (smp, value) => {
+          try {
+            await api.put(`/inventory/samples/${smp.id}`, { details: { ...smp.details, screening: value } });
+            await refresh();
+            notify(`Criblage de ${smp.code} : ${GRID_SCREENING[value]}.`, 'success');
+          } catch (err) {
+            notify(err.message, 'error');
+          }
+        }}
         onEdit={(s) => setMode({ kind: 'edit', sample: s })}
         onMove={(ids) => setPicker({ ids })}
         onMore={(s) => startAdd(s)}
@@ -322,16 +386,24 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
     <div className="box-view">
       <div className="box-main" ref={wrap}>
         <header className="box-head">
-          <h2>{grid ? null : <ShoppingBag size={20} aria-hidden="true" />} {unit.name}</h2>
-          <span className="muted">{grid ? `${unit.rows} × ${unit.cols} · ${free} place${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''}` : `${samples.length} tube${samples.length > 1 ? 's' : ''}`}</span>
+          <h2>{grid ? null : <ShoppingBag size={20} aria-hidden="true" />} {unitLabel(unit)}</h2>
+          <span className="muted">{round ? `${unit.format === 'g12' ? 'Boîte de 12 grilles' : GRIDBOX_FORMATS[unit.format]?.label} · ${free} position${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''}` : grid ? `${unit.rows} × ${unit.cols} · ${free} place${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''}` : `${samples.length} tube${samples.length > 1 ? 's' : ''}`}</span>
           <span className="box-actions">
-            <button type="button" className="btn btn-small btn-primary" onClick={() => startAdd()} disabled={grid && !free}><PackagePlus size={14} /> Ranger des tubes</button>
-            {grid && <button type="button" className="btn btn-small" onClick={() => setPasting(true)}><ClipboardPaste size={14} /> Coller depuis Excel</button>}
+            <button type="button" className="btn btn-small btn-primary" onClick={() => startAdd()} disabled={grid && !free}><PackagePlus size={14} /> Ranger des {noun.many}</button>
+            {grid && !round && <button type="button" className="btn btn-small" onClick={() => setPasting(true)}><ClipboardPaste size={14} /> Coller depuis Excel</button>}
             <a className="btn btn-small" href={`/api/inventory/units/${unit.id}/print`} target="_blank" rel="noreferrer"><Printer size={14} /> Plan à imprimer</a>
             <button type="button" className="btn btn-small btn-ghost" onClick={() => onEditUnit(unit)}><Pencil size={14} /> {grid ? 'Boîte' : 'Sac'}</button>
           </span>
         </header>
-        {grid ? (
+        {round ? (
+          <div className="gbox-wrap">
+            <div className="gbox" style={{ '--box': boxColor(unit), width: boxSize, height: boxSize }} role="group" aria-label={`Boîte ${unit.name} : ${GRIDBOX_FORMATS[unit.format]?.label}, position 1 en haut`}>
+              <span className="gbox-mark" title="Repère : position 1" aria-hidden="true" />
+              <span className="gbox-hub" aria-hidden="true" />
+              {gridboxSpots(unit.format).map((spot, c) => renderCell(0, c, spot))}
+            </div>
+          </div>
+        ) : grid ? (
           <div className="cbox-wrap">
             <div className="cbox" style={{ '--box': boxColor(unit), '--cell': `${cellSize}px` }} role="group" aria-label={`Boîte ${unit.name}, ${unit.rows} lignes et ${unit.cols} colonnes, A1 en haut à gauche`}>
               <div className="cbox-grid" style={{ gridTemplateColumns: `1.3rem repeat(${unit.cols}, var(--cell))` }}>
@@ -367,14 +439,14 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
         )}
         {samples.length > 0 && (
           <details className="box-list">
-            <summary><Info size={14} aria-hidden="true" /> Liste des {samples.length} tubes</summary>
+            <summary><Info size={14} aria-hidden="true" /> Liste des {samples.length} {noun.many}</summary>
             <table className="seq-table">
-              <thead><tr><th>Place</th><th>Code</th><th>Nom</th><th>Type</th><th>Conc. · volume</th><th>Congelé le</th></tr></thead>
+              <thead><tr><th>Place</th><th>Code</th><th>Nom</th><th>{round ? 'Support' : 'Type'}</th><th>{round ? 'Criblage' : 'Conc. · volume'}</th><th>{round ? 'Vitrifiée le' : 'Congelé le'}</th></tr></thead>
               <tbody>
                 {samples.map((s) => (
                   <tr key={s.id} className={sel.includes(s.id) ? 'is-selected' : ''} onClick={(e) => clickTube(s, e)}>
-                    <td>{s.position || '—'}</td><td>{s.code}</td><td><Cap sample={s} size={12} /> {s.name}</td><td>{TYPE_SHORT[s.type]}</td>
-                    <td>{[s.concentration, s.volume].filter(Boolean).join(' · ')}</td><td>{s.frozen_on ? new Date(`${s.frozen_on}T12:00:00`).toLocaleDateString('fr-FR') : ''}</td>
+                    <td>{s.position || '—'}</td><td>{s.code}</td><td>{!round && <Cap sample={s} size={12} />} {s.name}</td><td>{round ? s.details?.support : TYPE_SHORT[s.type]}</td>
+                    <td>{round ? GRID_SCREENING[s.details?.screening ?? 'todo'] : [s.concentration, s.volume].filter(Boolean).join(' · ')}</td><td>{s.frozen_on ? new Date(`${s.frozen_on}T12:00:00`).toLocaleDateString('fr-FR') : ''}</td>
                   </tr>
                 ))}
               </tbody>
@@ -386,15 +458,16 @@ export default function BoxView({ unit, tree, focus, onChanged, onEditUnit }) {
       {picker && (
         <BoxPicker
           tree={tree}
-          title={`Déplacer ${picker.ids.length > 1 ? `${picker.ids.length} tubes` : `« ${moving[0]?.name ?? ''} »`}`}
+          title={`Déplacer ${picker.ids.length > 1 ? `${picker.ids.length} ${noun.many}` : `« ${moving[0]?.name ?? ''} »`}`}
           need={picker.ids.length}
+          kinds={moving.every((s) => s.type === 'grid') ? ['gridbox'] : ['box', 'bag', 'gridbox']}
           moving={moving}
           confirmLabel="Déplacer ici"
           onClose={() => setPicker(null)}
           onPick={async (box, positions) => {
             const moves = moving.map((s, i) => ({ id: s.id, unit_id: box.id, row: positions?.[i]?.row ?? null, col: positions?.[i]?.col ?? null }));
             setPicker(null);
-            await move(moves, `${moves.length > 1 ? `${moves.length} tubes déplacés` : 'Tube déplacé'} vers « ${box.name} »${positions ? ` (${positions.map((p) => posLabel(p.row, p.col)).join(', ')})` : ''}.`);
+            await move(moves, `${moves.length > 1 ? `${moves.length} ${noun.many} déplacé${round ? 'e' : ''}s` : `${noun.One} déplacé${round ? 'e' : ''}`} vers « ${unitLabel(box)} »${positions ? ` (${positions.map((p) => positionLabel(box, p.row, p.col)).join(', ')})` : ''}.`);
             if (box.id !== unit.id) setSel([]);
           }}
         />

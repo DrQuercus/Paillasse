@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Node, NodeViewWrapper, ReactNodeViewRenderer, mergeAttributes } from '@tiptap/react';
-import { Calculator, ChartColumn, Columns4, Dna, ImagePlus, TestTube, X } from 'lucide-react';
+import { Aperture, Calculator, ChartColumn, Columns4, Dna, ImagePlus, TestTube, X } from 'lucide-react';
 
 /** Outils qu'un emplacement de modèle peut ouvrir. */
 export const SLOT_TOOLS = {
@@ -11,6 +11,15 @@ export const SLOT_TOOLS = {
   sequence: { Icon: Dna, name: 'Séquence du registre', action: 'Choisir…' },
   samples: { Icon: TestTube, name: 'Tubes à ranger', action: 'Ranger les tubes…' },
 };
+
+// Emplacement « tubes » réglé pour des grilles de cryo-EM (ranger ou citer)
+const GRID_SLOTS = {
+  store: { Icon: Aperture, name: 'Grilles à ranger', action: 'Ranger les grilles…' },
+  cite: { Icon: Aperture, name: 'Grilles utilisées', action: 'Citer les grilles…' },
+};
+const slotMeta = (tool, preset) => (tool === 'samples' && preset?.type === 'grid'
+  ? GRID_SLOTS[preset.mode === 'cite' ? 'cite' : 'store']
+  : SLOT_TOOLS[tool] ?? SLOT_TOOLS.image);
 
 const newSlotId = () => `slot-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 export const newSlot = (tool) => ({ type: 'templateSlot', attrs: { id: newSlotId(), tool, label: SLOT_TOOLS[tool].name, hint: '', preset: null } });
@@ -30,7 +39,7 @@ function useSlotMode(editor) {
 function SlotView({ node, editor, getPos, deleteNode, updateAttributes }) {
   const mode = useSlotMode(editor);
   const { tool, label, hint } = node.attrs;
-  const meta = SLOT_TOOLS[tool] ?? SLOT_TOOLS.image;
+  const meta = slotMeta(tool, node.attrs.preset);
   // Une entrée verrouillée (ou une version figée) n'affiche pas les emplacements restés vides
   if (mode === 'hidden') return <NodeViewWrapper className="slot-node" hidden />;
   const fill = () => editor.storage.templateSlot.fill?.(node.attrs, getPos());

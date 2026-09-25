@@ -5,7 +5,7 @@ import { query } from '../db.js';
 import { renderEntryPage } from '../lib/render.js';
 import { blobPath } from '../lib/storage.js';
 import { toGenbank } from '../lib/seq/genbank.js';
-import { SAMPLE_TYPES, locationText, posLabel, unitPath } from '../lib/inventory.js';
+import { SAMPLE_TYPES, locationText, positionLabel, unitPath } from '../lib/inventory.js';
 
 const router = Router();
 
@@ -40,7 +40,7 @@ export function storageCsv(units, samples) {
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const head = ['Code', 'Nom', 'Type', 'Emplacement', 'Position', 'Concentration', 'Volume', 'Aliquot', 'Congelé le', 'Périme le', 'Décongélations', 'Sorti du froid'];
   const rows = samples.filter((s) => !s.archived).map((s) => [
-    s.code, s.name, SAMPLE_TYPES[s.type]?.label ?? s.type, s.unit_id ? locationText(unitPath(byId, s.unit_id)) : '', posLabel(s.row, s.col),
+    s.code, s.name, SAMPLE_TYPES[s.type]?.label ?? s.type, s.unit_id ? locationText(unitPath(byId, s.unit_id)) : '', positionLabel(byId.get(s.unit_id), s.row, s.col),
     s.concentration, s.volume, s.aliquot, s.frozen_on ?? '', s.expires_on ?? '', s.thaw_count, s.status === 'out' ? 'oui' : '',
   ]);
   return `\uFEFF${[head, ...rows].map((r) => r.map(cell).join(';')).join('\r\n')}\r\n`;
