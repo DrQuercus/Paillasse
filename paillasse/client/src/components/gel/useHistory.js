@@ -9,6 +9,8 @@ function reducer(h, a) {
       if (next === h.present) return h;
       const now = Date.now();
       if (a.transient) return { ...h, present: next, pending: h.pending ?? h.present };
+      // Suite automatique de l'étape précédente (pistes recalées après un redressement…) : une seule étape à annuler
+      if (a.amend) return { ...h, present: next };
       if (a.key && a.key === h.lastKey && now - h.lastTime < 900) return { ...h, present: next, lastTime: now };
       return { past: [...h.past, h.pending ?? h.present].slice(-80), present: next, future: [], lastKey: a.key ?? null, lastTime: now, pending: null };
     }
@@ -32,7 +34,10 @@ function reducer(h, a) {
 
 export default function useHistory(initial) {
   const [h, dispatch] = useReducer(reducer, null, () => ({ past: [], present: initial, future: [], lastKey: null, lastTime: 0, pending: null }));
-  /** update(fn | valeur, { key, transient }) : key regroupe les changements rapprochés, transient attend commit(). */
+  /**
+   * update(fn | valeur, { key, transient, amend }) : key regroupe les changements rapprochés, transient attend
+   * commit(), amend complète la dernière étape au lieu d'en créer une.
+   */
   const update = useCallback((u, opts = {}) => dispatch({ type: 'set', update: u, ...opts }), []);
   const commit = useCallback(() => dispatch({ type: 'commit' }), []);
   const undo = useCallback(() => dispatch({ type: 'undo' }), []);

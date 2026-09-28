@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Download, MessageSquarePlus, RotateCcw, Trash2 } from 'lucide-react';
-import { FONTS, figureStyle, laneColor, panelWidths } from '../../lib/gel/figure.js';
-import { MODES, PANEL_ORDER, buildSummary, laneName } from '../../lib/gel/model.js';
-import { GEL_SIZES, canvasToBlob, drawGelFigure } from '../../lib/gel/render.js';
-import { Check, Range, Section, Segmented } from './controls.jsx';
-import { download, figurePanels, panelSvg, tableCsv } from './figureExport.js';
+import { ArrowDown, ArrowUp, MessageSquarePlus, RotateCcw, Trash2 } from 'lucide-react';
+import { FONTS, figureStyle, laneColor } from '../../../lib/gel/figure.js';
+import { MODES, PANEL_ORDER, laneName } from '../../../lib/gel/model.js';
+import { Check, Group, More, Range, Segmented } from '../controls.jsx';
 
 const PANEL_LABELS = { gel: 'Image du gel', profiles: 'Profils de migration', calibration: 'Courbe d’étalonnage', standards: 'Gamme étalon' };
+const SHORT_PANELS = { gel: 'gel', profiles: 'profils', calibration: 'étalonnage', standards: 'gamme' };
+const LAYOUTS = { column: 'en colonne', row: 'côte à côte', grid: 'en grille' };
+const DEFAULT_STYLE = { font: 'sans', fontSize: 14, lineWidth: 1.6, letters: false, colors: 'color' };
 
 // Réglages de mise en page rapides : un clic règle plusieurs options d'un coup
 const PRESETS = {
@@ -16,8 +16,15 @@ const PRESETS = {
   nb: { label: 'Noir et blanc', style: { colors: 'gray' }, gel: { darkBands: true }, profiles: {} },
 };
 
-export function StepFigure({ ctx }) {
-  const { state, update, results, tool, setTool, img, profiles, notify } = ctx;
+export function figureSummary(ctx) {
+  const f = ctx.state.figure;
+  const on = (f.order ?? PANEL_ORDER).filter((k) => f.panels[k]).map((k) => SHORT_PANELS[k]);
+  if (f.panels.table) on.push('tableau');
+  return `${on.join(', ') || 'vide'} · ${LAYOUTS[f.layout] ?? 'en colonne'}`;
+}
+
+export default function FigureModule({ ctx }) {
+  const { state, update, results, tool, setTool } = ctx;
   const f = state.figure;
   const setFig = (patch, opts) => update((s) => ({ ...s, figure: { ...s.figure, ...patch } }), opts);
   const setPanels = (patch) => setFig({ panels: { ...f.panels, ...patch } });
@@ -42,26 +49,9 @@ export function StepFigure({ ctx }) {
   }));
   const available = { gel: true, profiles: true, calibration: cal, standards: Boolean(results?.standard) };
 
-  const save = async (what) => {
-    try {
-      if (what === 'csv') {
-        const csv = tableCsv(buildSummary(state, results));
-        download(new Blob([`﻿${csv}`], { type: 'text/csv' }), 'bandes.csv');
-        return;
-      }
-      if (what === 'gel') {
-        download(await canvasToBlob(drawGelFigure(img, state, profiles, results)), 'gel.png');
-        return;
-      }
-      download(new Blob([panelSvg('profiles', { state, profiles, results })], { type: 'image/svg+xml' }), 'profils.svg');
-    } catch (err) {
-      notify(err.message, 'error');
-    }
-  };
-
   return (
     <>
-      <Section title="Éléments de la figure">
+      <Group title="Éléments">
         <ul className="gel-order">
           {order.map((key, i) => (
             <li key={key}>
@@ -71,24 +61,28 @@ export function StepFigure({ ctx }) {
             </li>
           ))}
         </ul>
-        <Check checked={f.panels.table} onChange={(table) => setPanels({ table })}>Tableau des bandes (texte, sous les images)</Check>
-      </Section>
+        <Check checked={f.panels.table} onChange={(table) => setPanels({ table })}>Tableau des bandes (sous les images)</Check>
+      </Group>
 
-      <Section title="Mise en page">
+      <Group title="Mise en page">
         <div className="gel-presets" role="group" aria-label="Préréglages">
           {Object.entries(PRESETS).map(([k, p]) => <button key={k} type="button" className="btn btn-small" onClick={() => applyPreset(p)}>{p.label}</button>)}
         </div>
-        <Segmented label="Disposition" value={f.layout} onChange={(layout) => setFig({ layout })} options={[['column', 'En colonne'], ['row', 'Côte à côte'], ['grid', 'Grille 2 × 2']]} />
+        <Segmented label="Disposition" value={f.layout} onChange={(layout) => setFig({ layout })} options={[['column', 'Colonne'], ['row', 'Côte à côte'], ['grid', 'Grille']]} />
         <Segmented label="Largeur dans la page" value={String(f.width)} onChange={(w) => setFig({ width: Number(w) })} options={[['50', '50 %'], ['75', '75 %'], ['100', '100 %']]} />
+      </Group>
+
+      <More title="Texte et traits">
         <Segmented label="Police" value={f.style.font} onChange={(font) => setStyle({ font })} options={Object.entries(FONTS).map(([k, v]) => [k, v.label])} />
         <Range label="Taille du texte" value={st.size} min={8} max={32} step={1} format={(v) => `${v} px`} onChange={(fontSize) => setStyle({ fontSize }, { key: 'fontSize' })} />
         <Range label="Épaisseur des courbes" value={st.line} min={0.5} max={5} step={0.1} format={(v) => `${v.toLocaleString('fr-FR')} px`} onChange={(lineWidth) => setStyle({ lineWidth }, { key: 'lineWidth' })} />
         <Segmented label="Couleurs" value={f.style.colors} onChange={(colors) => setStyle({ colors })} options={[['color', 'Couleur'], ['gray', 'Niveaux de gris']]} />
         <Check checked={f.style.letters} onChange={(letters) => setStyle({ letters })}>Lettres des panneaux (A, B, C…)</Check>
-      </Section>
+        <button type="button" className="link-btn small gel-align-start" onClick={() => setFig({ style: { ...DEFAULT_STYLE } })}><RotateCcw size={12} /> Style par défaut</button>
+      </More>
 
       {f.panels.gel && (
-        <Section title="Image du gel">
+        <More title="Image du gel">
           <Segmented label="Taille du gel" value={f.gel.size} onChange={(size) => setGel({ size })} options={[['S', 'Petite'], ['M', 'Moyenne'], ['L', 'Grande']]} />
           <Segmented label="Pistes" value={f.gel.overlay} onChange={(overlay) => setGel({ overlay })} options={[['none', 'Sans pistes'], ['lines', 'Lignes'], ['boxes', 'Cadres']]} />
           <Check checked={f.gel.laneLabels} onChange={(laneLabels) => setGel({ laneLabels })}>Noms des pistes</Check>
@@ -124,12 +118,12 @@ export function StepFigure({ ctx }) {
               ))}
             </ul>
           )}
-          <p className="hint">Contraste et aspect de l’image : réglages d’affichage de l’étape 1.</p>
-        </Section>
+          <small className="hint">Contraste de l’image : module Image.</small>
+        </More>
       )}
 
       {f.panels.profiles && (
-        <Section title="Profils">
+        <More title="Profils">
           <div className="gel-lane-picks">
             {results?.lanes.map((l, i) => (
               <label key={l.id} className="chip-check">
@@ -146,7 +140,7 @@ export function StepFigure({ ctx }) {
           <Segmented label="Normalisation" value={f.profiles.normalize} onChange={(normalize) => setProf({ normalize })} options={[['none', 'Aucune'], ['max', 'Maximum'], ['area', 'Aire totale']]} />
           <Segmented label="Axe horizontal" value={f.profiles.axis} onChange={(axis) => setProf({ axis })} options={[['size', 'Tailles'], ['position', 'Migration']]} />
           {f.profiles.mode !== 'stack' && (
-            <Segmented label="Légende" value={f.profiles.legend} onChange={(legend) => setProf({ legend })} options={[['inside', 'Dedans'], ['right', 'À droite'], ['top', 'Au-dessus'], ['none', 'Aucune']]} />
+            <Segmented label="Légende" value={f.profiles.legend} onChange={(legend) => setProf({ legend })} options={[['inside', 'Dedans'], ['right', 'À droite'], ['top', 'Dessus'], ['none', 'Aucune']]} />
           )}
           <Range label="Largeur du graphique" value={f.profiles.width} min={400} max={1600} step={20} format={(v) => `${v} px`} onChange={(width) => setProf({ width }, { key: 'profW' })} />
           <Range label="Hauteur du graphique" value={f.profiles.height} min={200} max={900} step={10} format={(v) => `${v} px`} onChange={(height) => setProf({ height }, { key: 'profH' })} />
@@ -154,74 +148,9 @@ export function StepFigure({ ctx }) {
           <Check checked={f.profiles.labels} onChange={(labels) => setProf({ labels })}>Tailles au-dessus des pics</Check>
           <Check checked={f.profiles.smooth} onChange={(smooth) => setProf({ smooth })}>Courbes lissées</Check>
           <Check checked={f.profiles.grid} onChange={(grid) => setProf({ grid })}>Quadrillage</Check>
-        </Section>
+        </More>
       )}
-
-      <Section title="Télécharger" open={false}>
-        <div className="gel-btn-row">
-          <button type="button" className="btn btn-small" onClick={() => save('gel')}><Download size={14} /> Gel (PNG)</button>
-          <button type="button" className="btn btn-small" onClick={() => save('profiles')}><Download size={14} /> Profils (SVG)</button>
-          <button type="button" className="btn btn-small" onClick={() => save('csv')} disabled={!results?.rows.length}><Download size={14} /> Tableau (CSV)</button>
-        </div>
-      </Section>
-      <button type="button" className="btn btn-small btn-ghost" onClick={() => update((s) => ({ ...s, figure: { ...s.figure, style: { font: 'sans', fontSize: 14, lineWidth: 1.6, letters: false, colors: 'color' } } }))}>
-        <RotateCcw size={14} /> Style par défaut
-      </button>
+      <small className="hint">Télécharger la figure entière, le gel seul ou le tableau : bouton « Télécharger », en haut.</small>
     </>
-  );
-}
-
-/** Panneau « gel » de l'aperçu : dessiné directement (sans encodage PNG), seulement quand ses réglages changent. */
-function GelPanelPreview({ img, state, profiles, results, letter, width, onSize }) {
-  const box = useRef(null);
-  const key = JSON.stringify([state.figure.gel, state.figure.style, state.display, state.lanes, state.annotations, state.expected, state.calibration, state.bandNames, letter]);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const c = drawGelFigure(img, state, profiles, results, { letter });
-      box.current?.replaceChildren(c);
-      onSize(c.width);
-    }, 60);
-    return () => clearTimeout(t);
-  }, [key, img, profiles, results]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <div ref={box} className="gelfig-canvas" style={{ width: `${width}%` }}><div className="gel-preview-wait">Rendu du gel…</div></div>;
-}
-
-/** Aperçu de la figure, telle qu'elle apparaîtra dans l'entrée (panneaux à la même échelle). */
-export function FigurePreview({ state, img, profiles, results }) {
-  const f = state.figure;
-  const [gelW, setGelW] = useState(null);
-  const summary = useMemo(() => (results ? buildSummary(state, results) : null), [state, results]);
-  const panels = results ? figurePanels(state, results) : [];
-  // SVG construits par figure.js à partir de nombres et de textes échappés
-  const svgs = useMemo(
-    () => Object.fromEntries(panels.filter((p) => p.panel !== 'gel').map((p) => [p.panel, panelSvg(p.panel, { state, profiles, results, letter: p.letter })])),
-    [f, state.lanes, state.calibration, state.mode, profiles, results], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  if (!results || !summary) return null;
-  const sizes = panels.map((p) => (p.panel === 'gel'
-    ? gelW ?? (GEL_SIZES[f.gel.size] ?? GEL_SIZES.M) + 120
-    : Number(/width="([\d.]+)"/.exec(svgs[p.panel] ?? '')?.[1] ?? 600)));
-  const widths = panelWidths(sizes, f.layout);
-  return (
-    <div className="gel-preview">
-      <p className="gel-preview-label">Aperçu de l’encart inséré dans l’entrée</p>
-      <figure className={`gelfig-card gelfig-${f.layout}`} style={{ width: `${f.width}%` }}>
-        <figcaption><strong>{summary.title}</strong> <span className="muted">— {summary.mode}</span></figcaption>
-        <div className="gelfig-panels">
-          {panels.map(({ panel, letter }, i) => (panel === 'gel'
-            ? <GelPanelPreview key={panel} img={img} state={state} profiles={profiles} results={results} letter={letter} width={widths[i]} onSize={setGelW} />
-            : <div key={panel} className="gelfig-svg" style={{ width: `${widths[i]}%` }} dangerouslySetInnerHTML={{ __html: svgs[panel] }} />))}
-        </div>
-        {f.panels.table && summary.table && (
-          <div className="calc-table-wrap">
-            <table className="calc-table">
-              <thead><tr>{summary.table.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-              <tbody>{summary.table.rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody>
-            </table>
-          </div>
-        )}
-        {summary.notes.map((n) => <p key={n} className="calc-note">{n}</p>)}
-      </figure>
-    </div>
   );
 }

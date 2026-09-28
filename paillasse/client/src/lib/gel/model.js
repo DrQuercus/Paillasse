@@ -141,6 +141,41 @@ export function shiftGeometry(state, dx, dy) {
     warp: state.warp.map((c) => ({ ...c, points: c.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) })),
   };
 }
+
+/**
+ * Fait tourner pistes et courbes de courbure avec l'image quand le redressement passe de « from » à
+ * « to » degrés : même rotation que prepareImage (autour du centre de l'image avant rognage).
+ * size = dimensions de l'image avant rognage ; imgSize = image de travail (rognée). Les corrections de
+ * bandes et les points d'étalonnage, liés aux anciennes positions, sont retirés.
+ */
+export function rotateGeometry(state, size, from, to, imgSize = size) {
+  if (from === to) return state;
+  const t = ((to - from) * Math.PI) / 180;
+  const cos = Math.cos(t);
+  const sin = Math.sin(t);
+  const off = state.prep?.crop ?? { x: 0, y: 0 };
+  const cx = (size.width - 1) / 2;
+  const cy = (size.height - 1) / 2;
+  const map = (x, y) => {
+    const dx = x + off.x - cx;
+    const dy = y + off.y - cy;
+    return [cx + dx * cos - dy * sin - off.x, cy + dx * sin + dy * cos - off.y];
+  };
+  const region = state.region ?? { top: 0, bottom: imgSize.height - 1 };
+  const clampX = (x) => Math.max(0, Math.min(imgSize.width - 1, Math.round(x)));
+  return {
+    ...state,
+    lanes: state.lanes.map((l) => {
+      const [x1, y1] = map(l.xTop, region.top);
+      const [x2, y2] = map(l.xBot, region.bottom);
+      const at = (y) => x1 + ((x2 - x1) * (y - y1)) / (y2 - y1 || 1);
+      return { ...l, xTop: clampX(at(region.top)), xBot: clampX(at(region.bottom)) };
+    }),
+    warp: state.warp.map((c) => ({ ...c, points: c.points.map((p) => { const [x, y] = map(p.x, p.y); return { x: Math.round(x), y: Math.round(y) }; }) })),
+    edits: {},
+    calibration: { ...state.calibration, points: [] },
+  };
+}
 export const laneName = (lane, i) => lane.name?.trim() || String(i + 1);
 
 // --- Calcul ---------------------------------------------------------------------------------------

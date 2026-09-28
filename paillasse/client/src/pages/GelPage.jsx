@@ -13,12 +13,14 @@ import LaddersPanel from '../components/gel/LaddersPanel.jsx';
 import useLadders from '../components/gel/useLadders.js';
 import { renderFigure, uploadFigure } from '../components/gel/figureExport.js';
 
-const STEPS = [
-  ['Image', 'orientation, redressement, rognage, aspect des bandes'],
-  ['Pistes', 'détection automatique, pistes inclinées, correction de courbure'],
-  ['Tailles', 'marqueur, attribution automatique, courbe d’étalonnage'],
-  ['Bandes', 'fond, aires, normalisation, gamme étalon, tailles attendues'],
-  ['Figure', 'gel avec ou sans pistes, profils, tableau : inséré dans une entrée'],
+// Les modules de l'atelier, tous sur un même écran ; pistes et marqueur sont posés d'office à l'ouverture
+const MODULES = [
+  ['Image', 'orientation, redressement, rognage, contraste'],
+  ['Pistes', 'détectées d’office, inclinées, courbure corrigée'],
+  ['Tailles', 'dernier marqueur appliqué d’office, courbe d’étalonnage'],
+  ['Bandes', 'sensibilité, fond, corrections à la main'],
+  ['Quantification', 'normalisation, gamme étalon, tailles attendues'],
+  ['Figure', 'gel, profils, tableau : insérée dans une entrée ou téléchargée (PNG, SVG)'],
 ];
 
 export default function GelPage() {
@@ -26,7 +28,7 @@ export default function GelPage() {
   const { notify } = useApp();
   const navigate = useNavigate();
   const ladders = useLadders();
-  const [session, setSession] = useState(null); // { source, initial, blob, filename, step }
+  const [session, setSession] = useState(null); // { source, initial, blob, filename, module }
   const [draft, setDraft] = useState(undefined);
   const [pending, setPending] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -34,7 +36,7 @@ export default function GelPage() {
   const saveTimer = useRef(null);
 
   const [opening, setOpening] = useState(null);
-  const open = useCallback(async (blob, filename, analysis = null, step = 'image') => {
+  const open = useCallback(async (blob, filename, analysis = null, module = undefined) => {
     setOpening(filename || 'image');
     try {
       // Laisser le navigateur afficher « Ouverture… » avant le décodage (quelques centaines de ms sur 10 Mpx)
@@ -43,7 +45,7 @@ export default function GelPage() {
       const initial = analysis
         ? { ...analysis, source: { ...analysis.source, attachmentId: null } }
         : { ...newAnalysis(lastMode()), source: { attachmentId: null, filename, width: info.width, height: info.height, bits: info.bits, format: info.format, lossy: info.lossy } };
-      setSession({ source: { image, info }, initial, blob, filename, step });
+      setSession({ source: { image, info }, initial, blob, filename, module });
       if (!analysis) saveDraft({ analysis: initial, blob, filename });
     } catch (err) {
       notify(err.message, 'error');
@@ -100,7 +102,7 @@ export default function GelPage() {
         <GelWorkbench
           source={session.source}
           initial={session.initial}
-          initialStep={session.step}
+          initialModule={session.module}
           submitLabel="Insérer dans une entrée…"
           onSubmit={async (result) => setPending(result)}
           onChange={onChange}
@@ -146,12 +148,12 @@ export default function GelPage() {
                 <strong>{draft.analysis?.name || draft.filename}</strong>
                 <span className="muted small"> — gel en cours, {MODES[draft.analysis?.mode]?.label.toLowerCase()}, modifié le {formatDateTime(draft.savedAt)}</span>
               </span>
-              <button type="button" className="btn btn-primary btn-small" onClick={() => open(draft.blob, draft.filename, { ...draft.analysis, source: { ...draft.analysis.source } }, draft.analysis.lanes?.length ? 'bands' : 'image')}>Reprendre</button>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => open(draft.blob, draft.filename, { ...draft.analysis, source: { ...draft.analysis.source } }, draft.analysis.lanes?.length ? 'bands' : undefined)}>Reprendre</button>
               <button type="button" className="btn btn-ghost btn-small" onClick={() => clearDraft().then(() => setDraft(null))}>Oublier</button>
             </div>
           )}
           <ol className="gel-howto">
-            {STEPS.map(([title, text], i) => <li key={title}><span className="gel-step-num">{i + 1}</span><strong>{title}</strong> <span className="muted">— {text}</span></li>)}
+            {MODULES.map(([title, text], i) => <li key={title}><span className="gel-step-num">{i + 1}</span><strong>{title}</strong> <span className="muted">— {text}</span></li>)}
           </ol>
           <p className="hint">
             Les mesures se font toujours sur les intensités brutes de l’image : contraste et palette ne changent pas les aires.

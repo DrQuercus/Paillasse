@@ -41,22 +41,30 @@ function linePath(vals, from, to, X, Y, px) {
   return d;
 }
 
-/** Étiquettes des sommets : jusqu'à trois hauteurs pour éviter les chevauchements, sinon rien. */
+/**
+ * Étiquettes des sommets : taille et part de la piste au-dessus de chaque bande, à la première hauteur
+ * libre (jusqu'à quatre) ; sans place, la taille seule, sinon rien. Les collisions sont vérifiées avec
+ * toutes les étiquettes déjà posées, quelle que soit leur hauteur.
+ */
 function placeLabels(s, from, to, X, Y, unit, show) {
-  const levels = [[], [], []];
+  const placed = [];
+  const free = (a, b, ly) => placed.every((r) => a > r.b + 3 || b < r.a - 3 || Math.abs(ly - r.y) > 11);
   return s.bands.map((b, i) => {
+    if (b.apex < from || b.apex > to) return null;
     const x = X(b.apex);
     const y = Y(s.values[b.apex], b.apex);
     const m = { apex: b.apex, x, y, saturated: b.saturated };
-    if (!show || b.apex < from || b.apex > to) return b.apex < from || b.apex > to ? null : m;
+    if (!show) return m;
     const label = b.size ? formatSize(b.size, unit) : `#${i + 1}`;
     const pct = `${formatNumber(b.percent, 2)} %`;
-    const half = ((label.length + pct.length + 1) * 5.6) / 2;
-    for (let k = 0; k < levels.length; k += 1) {
-      const ly = Math.max(PAD.t - 4 + k * 12, y - 7 - k * 12);
-      if (levels[k].every((r) => x - half > r.b + 3 || x + half < r.a - 3 || Math.abs(ly - r.y) > 11)) {
-        levels[k].push({ a: x - half, b: x + half, y: ly });
-        return { ...m, label, pct, ly };
+    for (const withPct of [true, false]) {
+      const half = (((withPct ? label.length + pct.length + 1 : label.length)) * 5.6) / 2;
+      for (let k = 0; k < 4; k += 1) {
+        const ly = Math.max(PAD.t - 4 + k * 12, y - 7 - k * 12);
+        if (free(x - half, x + half, ly)) {
+          placed.push({ a: x - half, b: x + half, y: ly });
+          return { ...m, label, pct: withPct ? pct : null, ly };
+        }
       }
     }
     return m;
@@ -292,7 +300,7 @@ export default function AnalysisChart({
               <circle cx={f1(m.x)} cy={f1(m.y)} r="3.2" fill={m.saturated ? '#DC2626' : series[0].color} />
               {m.label && (
                 <text x={f1(m.x)} y={f1(m.ly)} fontSize="10" textAnchor="middle" fill="#1D2940">
-                  {m.label}<tspan fill="#0E7490"> {m.pct}</tspan>
+                  {m.label}{m.pct && <tspan fill="#0E7490"> {m.pct}</tspan>}
                 </text>
               )}
             </g>

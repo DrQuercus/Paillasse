@@ -1,124 +1,100 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Check as CheckIcon, ChevronRight, Redo2, Undo2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PanelRightClose, PanelRightOpen, Redo2, Undo2, X } from 'lucide-react';
 import { useApp } from '../../context.js';
-import { prepareImage } from '../../lib/gel/raster.js';
-import { MODES, computeProfiles, computeResults, createProfileCache, imageInfo, newId, normalizeAnalysis, shiftGeometry, suggestCalibration, switchMode } from '../../lib/gel/model.js';
+import { MODES, computeProfiles, computeResults, newId, shiftGeometry, suggestCalibration, switchMode } from '../../lib/gel/model.js';
 import { formatSize } from '../../lib/gel/calibration.js';
 import { renderToCanvas, signalRange } from '../../lib/gel/render.js';
+import { lastLadder } from '../../lib/gel/draft.js';
 import Modal from '../Modal.jsx';
-import { Segmented } from './controls.jsx';
+import { ModuleCard, Segmented } from './controls.jsx';
 import GelCanvas from './GelCanvas.jsx';
 import AnalysisPanel from './AnalysisPanel.jsx';
-import QuickPanel from './QuickPanel.jsx';
+import FigurePreview from './FigurePreview.jsx';
+import DownloadMenu from './DownloadMenu.jsx';
 import LaddersPanel from './LaddersPanel.jsx';
-import { StepImage, StepLanes, detectLanesInto } from './StepsPrepare.jsx';
-import { StepBands, StepSizes } from './StepsMeasure.jsx';
-import { FigurePreview, StepFigure } from './StepFigure.jsx';
-import useHistory from './useHistory.js';
+import { MODULES } from './modules/index.js';
+import { detectLanesInto, rotateLanesInto } from './modules/LanesModule.jsx';
+import useGelAnalysis from './useGelAnalysis.js';
 import useLadders, { ladderSnapshot } from './useLadders.js';
-import { lastLadder, lastView, rememberView } from '../../lib/gel/draft.js';
-
-const STEPS = [
-  ['image', 'Image', StepImage],
-  ['lanes', 'Pistes', StepLanes],
-  ['sizes', 'Tailles', StepSizes],
-  ['bands', 'Bandes', StepBands],
-  ['figure', 'Figure', StepFigure],
-];
 
 const TOOL_HINTS = {
-  addLane: 'Cliquez sur le gel pour placer une piste (Échap pour terminer).',
+  addLane: 'Cliquez sur le gel pour placer une piste.',
   crop: 'Tracez le cadre à garder.',
-  warp: 'Cliquez sur une même bande dans plusieurs pistes.',
+  warp: 'Cliquez sur une même bande dans plusieurs pistes, de gauche à droite.',
   band: 'Cliquez sur une bande pour la retirer, à côté pour en ajouter une.',
   annotate: 'Cliquez à la hauteur de la bande à signaler.',
 };
 
+const PANEL_KEY = 'paillasse.gel.panel';
+const readPanel = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(PANEL_KEY) ?? 'null');
+    return { width: Number(v?.width) || 440, open: v?.open !== false };
+  } catch {
+    return { width: 440, open: true };
+  }
+};
+const savePanel = (p) => { try { localStorage.setItem(PANEL_KEY, JSON.stringify(p)); } catch { /* sans stockage */ } };
+
 /**
- * Atelier d'analyse d'un gel, en plein écran : cinq étapes guidées, annuler / rétablir.
- * source = { image, info } (image décodée) ; initial = état de l'analyse (model.js).
+ * Atelier d'analyse d'un gel, en plein écran et sur un seul écran : modules repliables à gauche (image,
+ * pistes, tailles, bandes, quantification, figure), gel ou aperçu de la figure au centre, analyse à droite.
+ * À l'ouverture d'une nouvelle image, pistes détectées et dernier marqueur appliqué d'office.
+ * source = { image, info } (image décodée) ; initial = état de l'analyse (model.js) ; initialModule = module ouvert.
  * onSubmit({ state, img, profiles, results }) produit la figure (insertion dans l'entrée…).
  */
-export default function GelWorkbench({ source, initial, initialStep, submitLabel = 'Insérer dans l’entrée', onSubmit, onClose, onChange }) {
+export default function GelWorkbench({ source, initial, initialModule, submitLabel = 'Insérer dans l’entrée', onSubmit, onClose, onChange }) {
   const { notify } = useApp();
-  const [start] = useState(() => normalizeAnalysis(initial));
-  const { state, update, commit, undo, redo, canUndo, canRedo } = useHistory(start);
-  const [step, setStep] = useState(initialStep ?? 'image');
-  // Présentation : pas à pas (guidé) ou rapide (tout sur un écran) ; une figure rouverte l'est en pas à pas
-  const [view, setViewState] = useState(() => (initialStep === 'figure' ? 'steps' : lastView()));
-  const setView = (v) => { setViewState(v); rememberView(v); };
-  const [detailsW, setDetailsW] = useState(() => {
-    try { return Number(localStorage.getItem('paillasse.gel.panel')) || 440; } catch { return 440; }
-  });
+  const ctxRef = useRef(null);
+  const getCtx = useCallback(() => ctxRef.current, []);
+  const a = useGelAnalysis(source, initial, getCtx);
+  const { state, update, commit, undo, redo, canUndo, canRedo, img, uncropped, profiles, results, polarity } = a;
+  const fresh = useRef(!initial?.lanes?.length);
+
+  const [openKey, setOpenKey] = useState(() => initialModule ?? (fresh.current ? 'lanes' : 'bands'));
+  const [view, setView] = useState(() => (initialModule === 'figure' ? 'figure' : 'gel'));
   const [tool, setToolState] = useState('select');
-  const [activeLaneId, setActiveLaneId] = useState(() => start.lanes.find((l) => l.role !== 'ladder')?.id ?? start.lanes[0]?.id ?? null);
+  const [activeLaneId, setActiveLaneId] = useState(() => state.lanes.find((l) => l.role !== 'ladder')?.id ?? state.lanes[0]?.id ?? null);
   const [hoverPos, setHoverPos] = useState(null);
   const [activeWarpId, setActiveWarpId] = useState(null);
   const [calibSize, setCalibSize] = useState(null);
   const [laddersOpen, setLaddersOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [panel, setPanelState] = useState(readPanel);
+  const [overlay, setOverlay] = useState(true);
   const ladders = useLadders();
   const setTool = useCallback((t) => { setToolState(t); if (t !== 'warp') setActiveWarpId(null); }, []);
+  const setPanel = (patch) => setPanelState((p) => { const next = { ...p, ...patch }; savePanel(next); return next; });
 
-  // Images : l'original n'est jamais modifié ; le rognage se fait en dernier (et se voit en entier pendant l'outil)
-  const { rotate90, flipH, flipV, angle, crop } = state.prep;
-  const uncropped = useMemo(() => prepareImage(source.image, { rotate90, flipH, flipV, angle }), [source.image, rotate90, flipH, flipV, angle]);
-  const img = useMemo(() => (crop ? prepareImage(uncropped, { crop }) : uncropped), [uncropped, crop]);
-  // Mémoire des lectures de pistes : déplacer une piste ne relit qu'elle, régler la détection ne relit rien
-  const cache = useRef(null);
-  if (!cache.current) cache.current = createProfileCache();
-  const detectedPolarity = useMemo(() => imageInfo(img, cache.current).polarity, [img]);
-  const polarity = state.polarity === 'auto' ? detectedPolarity : state.polarity;
+  // Messages courants (pistes trouvées, taille placée…) : une ligne discrète sur le gel, pas une pile de notifications
+  const [notice, setNotice] = useState(null);
+  const noticeTimer = useRef(null);
+  const say = useCallback((text) => {
+    clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = setTimeout(() => setNotice(null), 6000);
+  }, []);
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
+  // Annuler, rétablir : le dernier message ne décrit plus l'état affiché
+  const doUndo = useCallback(() => { setNotice(null); undo(); }, [undo]);
+  const doRedo = useCallback(() => { setNotice(null); redo(); }, [redo]);
 
-  // Calculs sur l'état différé : l'interface reste fluide pendant qu'on glisse une piste
-  const d = useDeferredValue(state);
-  const profiles = useMemo(() => computeProfiles(img, d, cache.current), [img, d.polarity, d.signal, d.region, d.laneWidth, d.lanes, d.warp, d.detection, d.edits]); // eslint-disable-line react-hooks/exhaustive-deps
-  const results = useMemo(() => computeResults(profiles, d, source.info), [profiles, d.calibration, d.quant, d.expected, d.mode, d.bandNames]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Redressement : aperçu immédiat (l'image affichée tourne), calcul réel quand on lâche le curseur
-  const [anglePreview, setAnglePreview] = useState(null);
-  const angleTimer = useRef(null);
-  const commitAngle = useCallback((angle) => {
-    clearTimeout(angleTimer.current);
-    setAnglePreview(null);
-    update((s) => (s.prep.angle === angle ? s : { ...s, prep: { ...s.prep, angle } }), { key: 'angle' });
-  }, [update]);
-  const previewAngle = useCallback((angle) => {
-    setAnglePreview(angle);
-    clearTimeout(angleTimer.current);
-    angleTimer.current = setTimeout(() => commitAngle(angle), 450);
-  }, [commitAngle]);
-  useEffect(() => () => clearTimeout(angleTimer.current), []);
-  // Action qui a besoin de l'image redressée (détection des pistes) : attend le calcul en cours
-  const ctxRef = useRef(null);
-  const afterImage = useRef(null);
-  useEffect(() => {
-    const fn = afterImage.current;
-    afterImage.current = null;
-    fn?.(ctxRef.current);
-  }, [img]);
-  const settle = (fn) => {
-    if (anglePreview === null || anglePreview === (state.prep.angle ?? 0)) {
-      if (anglePreview !== null) { clearTimeout(angleTimer.current); setAnglePreview(null); }
-      fn(ctxRef.current);
-      return;
-    }
-    afterImage.current = fn;
-    commitAngle(anglePreview);
-  };
-  const goStep = (key) => {
-    if (anglePreview !== null) commitAngle(anglePreview);
-    setStep(key);
+  const toggleModule = (key) => {
+    a.flushAngle();
     setTool('select');
+    const next = openKey === key ? null : key;
+    setOpenKey(next);
+    // La figure se règle en la regardant ; les autres modules travaillent sur le gel
+    if (next === 'figure') setView('figure');
+    else if (next) setView('gel');
   };
 
-  // Rendu de l'image (mis en cache : ne dépend que de l'image et des réglages d'affichage, différés)
+  // Rendu de l'image (ne dépend que de l'image et des réglages d'affichage)
   const viewImg = tool === 'crop' ? uncropped : img;
-  const display = useDeferredValue(state.display);
   const range = useMemo(() => signalRange(viewImg, polarity), [viewImg, polarity]);
   const base = useMemo(
-    () => renderToCanvas(viewImg, { polarity, display, darkBands: polarity === 'dark', colormap: display.colormap, range }),
-    [viewImg, polarity, display, range],
+    () => renderToCanvas(viewImg, { polarity, display: state.display, darkBands: polarity === 'dark', colormap: state.display.colormap, range }),
+    [viewImg, polarity, state.display, range],
   );
 
   useEffect(() => { onChange?.(state); }, [state, onChange]);
@@ -133,13 +109,13 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
   // Raccourcis : Ctrl+Z / Ctrl+Maj+Z, Échap
   useEffect(() => {
     const onKey = (e) => {
-      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range' && e.target.type !== 'checkbox' && e.target.type !== 'radio';
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !['range', 'checkbox', 'radio'].includes(e.target.type);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) {
         e.preventDefault();
-        if (e.shiftKey) redo(); else undo();
+        if (e.shiftKey) doRedo(); else doUndo();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && !typing) {
         e.preventDefault();
-        redo();
+        doRedo();
       } else if (e.key === 'Escape' && tool !== 'select' && !document.querySelector('.modal-backdrop')) {
         e.stopPropagation();
         setTool('select');
@@ -147,12 +123,12 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [undo, redo, tool, setTool]);
+  }, [doUndo, doRedo, tool, setTool]);
 
   // --- Actions sur le gel ------------------------------------------------------------------------
   const onLaneAdd = (x) => {
     const id = newId();
-    update((s) => ({ ...s, lanes: [...s.lanes, { id, name: String(s.lanes.filter((l) => l.role !== 'ladder').length + 1), xTop: x, xBot: x, role: 'sample' }].sort((a, b) => a.xTop - b.xTop) }));
+    update((s) => ({ ...s, lanes: [...s.lanes, { id, name: String(s.lanes.filter((l) => l.role !== 'ladder').length + 1), xTop: x, xBot: x, role: 'sample' }].sort((p, q) => p.xTop - q.xTop) }));
     setActiveLaneId(id);
   };
   const onLaneChange = (id, patch, opts) => update((s) => ({ ...s, lanes: s.lanes.map((l) => (l.id === id ? { ...l, ...patch } : l)) }), opts);
@@ -180,9 +156,9 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
       const points = [...state.calibration.points.filter((p) => p.size !== calibSize && Math.abs(p.pos - at) > 1), { size: calibSize, pos: at }];
       update((s) => ({ ...s, calibration: { ...s.calibration, points } }));
       const next = sizes.find((sz) => sz < calibSize && !points.some((p) => p.size === sz));
+      say(`${formatSize(calibSize, MODES[state.mode].unit)} placé${next ? ` ; suivante : ${formatSize(next, MODES[state.mode].unit)}` : ''}.`);
       if (next) setCalibSize(next);
       else setTool('select');
-      notify(`${formatSize(calibSize, MODES[state.mode].unit)} placé.`, 'success');
       return;
     }
     if (tool === 'band') {
@@ -191,8 +167,8 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
         const e = s.edits?.[laneId] ?? { added: [], removed: [] };
         const hit = near && Math.abs(near.apex - pos) <= tol / 2;
         const next = hit
-          ? { added: (e.added ?? []).filter((a) => Math.abs(a - near.apex) > tol), removed: [...(e.removed ?? []), near.apex] }
-          : { added: [...(e.added ?? []), pos], removed: (e.removed ?? []).filter((r) => Math.abs(r - pos) > tol) };
+          ? { ...e, added: (e.added ?? []).filter((x) => Math.abs(x - near.apex) > tol), removed: [...(e.removed ?? []), near.apex] }
+          : { ...e, added: [...(e.added ?? []), pos], removed: (e.removed ?? []).filter((r) => Math.abs(r - pos) > tol) };
         return { ...s, edits: { ...s.edits, [laneId]: next } };
       });
     }
@@ -200,14 +176,19 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
   const onAnnotate = (pos) => {
     update((s) => ({ ...s, annotations: [...(s.annotations ?? []), { id: newId(), pos, text: 'Bande' }] }));
     setTool('select');
-    notify('Flèche ajoutée : modifiez son texte dans le panneau.', 'success');
+    setView('figure');
+    say('Flèche ajoutée : changez son texte dans le module Figure.');
   };
 
+  // Données à jour pour produire la figure (sans attendre les calculs différés)
+  const current = () => {
+    const p = computeProfiles(img, state, a.cache);
+    return { state, img, profiles: p, results: computeResults(p, state, source.info) };
+  };
   const submit = async () => {
     setBusy(true);
     try {
-      const fresh = computeProfiles(img, state, cache.current);
-      await onSubmit({ state, img, profiles: fresh, results: computeResults(fresh, state, source.info) });
+      await onSubmit(current());
     } catch (err) {
       notify(err.message, 'error');
     } finally {
@@ -215,45 +196,51 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
     }
   };
 
-  const done = {
-    image: true,
-    lanes: state.lanes.length > 0,
-    sizes: Boolean(results.calibration),
-    bands: results.lanes.some((l) => l.bands.length),
-    figure: false,
-  };
-  const stepIndex = STEPS.findIndex(([k]) => k === step);
-  const StepPanel = STEPS[stepIndex][2];
+  // Bandes du marqueur à réattribuer dès que les pistes (re)détectées sont lues
+  const wantAssign = useRef(false);
+  const requestAssign = useCallback(() => { wantAssign.current = true; }, []);
+  // Image redressée : les pistes sont recalées, dans la même étape de l'historique. Redétectées si on en
+  // retrouve autant (noms et rôles gardés), sinon tournées avec l'image (pistes placées à la main).
+  const onStraightened = useCallback((c, from, to) => {
+    if (!detectLanesInto(c, { quiet: true, keep: c.state.lanes, sameOnly: true, amend: true })) rotateLanesInto(c, from, to);
+    say('Pistes recalées sur l’image redressée.');
+  }, [say]);
+
   const ctx = {
-    state, update, commit, profiles, results, info: source.info, img, uncropped, detectedPolarity, tool, setTool, cache: cache.current,
-    angle: anglePreview ?? state.prep.angle ?? 0, previewAngle, commitAngle, settle,
-    activeLaneId, setActiveLaneId, activeWarpId, setActiveWarpId, calibSize, setCalibSize, ladders, notify,
-    openLadders: () => setLaddersOpen(true),
+    ...a, info: source.info, tool, setTool, activeLaneId, setActiveLaneId, activeWarpId, setActiveWarpId,
+    calibSize, setCalibSize, ladders, notify, say, requestAssign, onStraightened, openLadders: () => setLaddersOpen(true),
   };
   ctxRef.current = ctx;
-  const quick = view === 'quick';
-  const showDetails = quick || (step !== 'image' && step !== 'figure');
 
-  // Analyse rapide : pistes détectées et dernier marqueur appliqué d'office (une fois par image)
+  // Première passe automatique sur une nouvelle image : pistes détectées, dernier marqueur appliqué.
+  // Elle fait partie de l'ouverture : rien à annuler.
   const auto = useRef({ lanes: false, ladder: false });
   useEffect(() => { auto.current.ladder = false; }, [state.mode]);
   useEffect(() => {
-    if (!quick || state.lanes.length || auto.current.lanes) return;
+    if (!fresh.current || state.lanes.length || auto.current.lanes) return;
     auto.current.lanes = true;
-    detectLanesInto(ctx);
-  }, [quick, state.lanes.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    detectLanesInto(ctx, { amend: true });
+  }, [state.lanes.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!quick || auto.current.ladder || state.calibration.ladder || !ladders) return;
+    if (!a.settled) return;
+    const cal = state.calibration;
     const lane = results.ladderLane;
-    if (!lane || lane.id !== state.calibration.laneId || !lane.bands.length) return;
+    const ready = lane && lane.id === cal.laneId && lane.bands.length > 0;
+    if (wantAssign.current && cal.ladder) {
+      if (!ready) return;
+      wantAssign.current = false;
+      if (!cal.points.length) update((s) => ({ ...s, calibration: { ...s.calibration, points: suggestCalibration(results, s.calibration.ladder) } }), { amend: true });
+      return;
+    }
+    if (auto.current.ladder || cal.ladder || !ladders || !ready) return;
     auto.current.ladder = true;
     const kind = MODES[state.mode].ladderKind;
     const found = ladders.find((l) => l.id === lastLadder(kind) && l.kind === kind && !l.archived);
     if (!found) return;
     const snap = ladderSnapshot(found);
-    update((s) => ({ ...s, calibration: { ...s.calibration, ladder: snap, points: suggestCalibration(results, snap) } }));
-    notify(`Marqueur « ${found.name} » appliqué (le dernier utilisé) : changez-le si besoin.`, 'success');
-  }, [quick, results, ladders, state.calibration.ladder, state.calibration.laneId]); // eslint-disable-line react-hooks/exhaustive-deps
+    update((s) => ({ ...s, calibration: { ...s.calibration, ladder: snap, points: suggestCalibration(results, snap) } }), { amend: !canUndo });
+    say(`Marqueur « ${found.name} » appliqué (le dernier utilisé) : changez-le dans Tailles si besoin.`);
+  }, [results, a.settled, ladders, state.calibration.ladder, state.calibration.laneId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Panneau d'analyse redimensionnable (poignée sur son bord gauche)
   const body = useRef(null);
@@ -263,16 +250,22 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
     el.setPointerCapture(e.pointerId);
     const move = (ev) => {
       const r = body.current.getBoundingClientRect();
-      setDetailsW(Math.round(Math.max(320, Math.min(r.width - 330 - 280, r.right - ev.clientX))));
+      setPanelState((p) => ({ ...p, width: Math.round(Math.max(320, Math.min(r.width - 320 - 300, r.right - ev.clientX))) }));
     };
     const up = () => {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
-      setDetailsW((w) => { try { localStorage.setItem('paillasse.gel.panel', String(w)); } catch { /* sans stockage */ } return w; });
+      setPanelState((p) => { savePanel(p); return p; });
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
   };
+
+  const showFigure = view === 'figure' && tool !== 'annotate';
+  const showDetails = panel.open && !showFigure;
+  const hint = tool === 'calib'
+    ? `Cliquez sur la bande de ${formatSize(calibSize, MODES[state.mode].unit)} dans la piste du marqueur.`
+    : TOOL_HINTS[tool];
 
   return (
     <div className="gel-wb" role="dialog" aria-modal="true" aria-label="Analyse de gel">
@@ -280,77 +273,82 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
         <button type="button" className="btn btn-ghost" onClick={onClose}><X size={16} /> Fermer</button>
         <input className="gel-title" value={state.name} onChange={(e) => update((s) => ({ ...s, name: e.target.value }), { key: 'name' })} placeholder="Titre de la figure" aria-label="Titre de la figure" />
         <Segmented label="Type de gel" value={state.mode} onChange={(mode) => update((s) => switchMode(s, mode))} options={Object.entries(MODES).map(([k, m]) => [k, m.label])} />
-        <Segmented label="Présentation" value={view} onChange={(v) => { setView(v); goStep(step); }} options={[['steps', 'Pas à pas'], ['quick', 'Rapide']]} />
         <div className="gel-wb-actions">
-          <button type="button" className="icon-btn" onClick={undo} disabled={!canUndo} title="Annuler (Ctrl+Z)" aria-label="Annuler"><Undo2 size={17} /></button>
-          <button type="button" className="icon-btn" onClick={redo} disabled={!canRedo} title="Rétablir (Ctrl+Maj+Z)" aria-label="Rétablir"><Redo2 size={17} /></button>
+          <button type="button" className="icon-btn" onClick={doUndo} disabled={!canUndo} title="Annuler (Ctrl+Z)" aria-label="Annuler"><Undo2 size={17} /></button>
+          <button type="button" className="icon-btn" onClick={doRedo} disabled={!canRedo} title="Rétablir (Ctrl+Maj+Z)" aria-label="Rétablir"><Redo2 size={17} /></button>
+          <DownloadMenu getData={current} notify={notify} />
           <button type="button" className="btn btn-primary" onClick={submit} disabled={busy || !state.lanes.length}>{busy ? 'Enregistrement…' : submitLabel}</button>
         </div>
       </header>
-      <div ref={body} className={`gel-wb-body${showDetails ? '' : ' no-details'}`} style={{ '--gel-details-w': `${detailsW}px` }}>
-        <aside className="gel-wb-side">
-          {quick ? <QuickPanel ctx={ctx} onFigure={() => { setView('steps'); goStep('figure'); }} /> : (
-          <>
-          <nav className="gel-steps" aria-label="Étapes">
-            {STEPS.map(([key, label], i) => (
-              <button key={key} type="button" className={`gel-step${key === step ? ' is-active' : ''}${done[key] ? ' is-done' : ''}`} onClick={() => goStep(key)} aria-current={key === step ? 'step' : undefined}>
-                <span className="gel-step-num">{done[key] && key !== step ? <CheckIcon size={12} /> : i + 1}</span>{label}
-              </button>
-            ))}
-          </nav>
+      <div ref={body} className={`gel-wb-body${showDetails ? '' : ' no-details'}`} style={{ '--gel-details-w': `${panel.width}px` }}>
+        <aside className="gel-wb-side" aria-label="Réglages">
           <p className="gel-mode-hint">{MODES[state.mode].hint}</p>
-          <div className="gel-step-panel">
-            <StepPanel ctx={ctx} />
-            {stepIndex < STEPS.length - 1 && (
-              <button type="button" className="btn gel-next" onClick={() => goStep(STEPS[stepIndex + 1][0])}>
-                Étape suivante : {STEPS[stepIndex + 1][1]} <ChevronRight size={15} />
-              </button>
-            )}
-          </div>
-          </>
-          )}
-          {results.warnings.length > 0 && (quick || step !== 'figure') && (
+          {MODULES.map((m) => (
+            <ModuleCard key={m.key} title={m.title} icon={m.icon} summary={m.summary(ctx)} done={m.done(ctx)} open={openKey === m.key} onToggle={() => toggleModule(m.key)}>
+              <m.Component ctx={ctx} />
+            </ModuleCard>
+          ))}
+          {results.warnings.length > 0 && (
             <ul className="gel-warnings" aria-label="Avertissements">
               {results.warnings.map((w) => <li key={w}>{w}</li>)}
             </ul>
           )}
         </aside>
         <main className="gel-wb-main">
-          {!quick && step === 'figure' && tool !== 'annotate'
-            ? <FigurePreview state={state} img={img} profiles={profiles} results={results} />
-            : (
-              <GelCanvas
-                img={viewImg}
-                base={base}
-                state={state}
-                profiles={profiles}
-                results={results}
-                tool={tool}
-                activeLaneId={activeLaneId}
-                onSelectLane={setActiveLaneId}
-                hoverPos={hoverPos}
-                onHover={setHoverPos}
-                showRegion={!quick && step === 'lanes'}
-                showBands={quick || step === 'sizes' || step === 'bands' || step === 'figure'}
-                showGrid={(quick ? anglePreview !== null : step === 'image') && tool !== 'crop'}
-                cropRect={state.prep.crop}
-                previewRotation={anglePreview === null ? 0 : anglePreview - (state.prep.angle ?? 0)}
-                activeWarpId={activeWarpId}
-                onLaneAdd={onLaneAdd}
-                onLaneChange={onLaneChange}
-                onRegionChange={onRegionChange}
-                onDragEnd={commit}
-                onCrop={onCrop}
-                onWarpPoint={onWarpPoint}
-                onPick={onPick}
-                onAnnotate={onAnnotate}
-              />
+          <div className="gel-main-bar">
+            <Segmented label="Vue" value={showFigure ? 'figure' : 'gel'} onChange={(v) => { setTool('select'); setView(v); }} options={[['gel', 'Gel'], ['figure', 'Figure']]} />
+            <div className="gel-main-msg">
+              {hint && <span className="gel-tool-hint">{hint} <button type="button" className="link-btn" onClick={() => setTool('select')}>Terminer</button></span>}
+              {notice && !hint && (
+                <span className="gel-notice" role="status">
+                  <span>{notice}</span>
+                  <button type="button" className="icon-btn" onClick={() => setNotice(null)} aria-label="Fermer le message"><X size={13} /></button>
+                </span>
+              )}
+            </div>
+            {!panel.open && !showFigure && (
+              <button type="button" className="btn btn-ghost btn-small gel-panel-open" onClick={() => setPanel({ open: true })} title="Afficher l’analyse (profils, étalonnage, tableau)">
+                <PanelRightOpen size={15} /> Analyse
+              </button>
             )}
-          {TOOL_HINTS[tool] && <div className="gel-tool-hint">{TOOL_HINTS[tool]} <button type="button" className="link-btn" onClick={() => setTool('select')}>Terminer</button></div>}
-          {tool === 'calib' && <div className="gel-tool-hint">Cliquez sur la bande de {formatSize(calibSize, MODES[state.mode].unit)} dans la piste du marqueur. <button type="button" className="link-btn" onClick={() => setTool('select')}>Terminer</button></div>}
+          </div>
+          <div className="gel-stage">
+            {showFigure
+              ? <FigurePreview state={state} img={img} profiles={profiles} results={results} />
+              : (
+                <GelCanvas
+                  img={viewImg}
+                  base={base}
+                  state={state}
+                  profiles={profiles}
+                  results={results}
+                  polarity={polarity}
+                  tool={tool}
+                  overlay={overlay}
+                  onOverlay={setOverlay}
+                  activeLaneId={activeLaneId}
+                  onSelectLane={setActiveLaneId}
+                  hoverPos={hoverPos}
+                  onHover={setHoverPos}
+                  showRegion={openKey === 'lanes'}
+                  showGrid={(openKey === 'image' || a.anglePreview !== null) && tool !== 'crop'}
+                  cropRect={state.prep.crop}
+                  previewRotation={a.anglePreview === null ? 0 : a.anglePreview - (state.prep.angle ?? 0)}
+                  activeWarpId={activeWarpId}
+                  onLaneAdd={onLaneAdd}
+                  onLaneChange={onLaneChange}
+                  onRegionChange={onRegionChange}
+                  onDragEnd={commit}
+                  onCrop={onCrop}
+                  onWarpPoint={onWarpPoint}
+                  onPick={onPick}
+                  onAnnotate={onAnnotate}
+                />
+              )}
+          </div>
         </main>
         {showDetails && (
-          <aside className="gel-wb-details">
+          <aside className="gel-wb-details" aria-label="Analyse">
             <AnalysisPanel
               state={state}
               update={update}
@@ -364,6 +362,7 @@ export default function GelWorkbench({ source, initial, initialStep, submitLabel
               onPick={onPick}
               pickable={tool === 'band' || tool === 'calib'}
               onRenameBand={onRenameBand}
+              extra={<button type="button" className="icon-btn gel-panel-close" onClick={() => setPanel({ open: false })} title="Masquer l’analyse" aria-label="Masquer l’analyse"><PanelRightClose size={16} /></button>}
             />
           </aside>
         )}

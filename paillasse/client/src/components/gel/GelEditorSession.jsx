@@ -106,7 +106,7 @@ export default function GelEditorSession({ session, entryId, upload, onInsert, o
     <GelWorkbench
       source={loaded.source}
       initial={loaded.initial}
-      initialStep={session.attrs ? 'figure' : 'image'}
+      initialModule={session.attrs ? 'figure' : undefined}
       submitLabel={session.attrs ? 'Mettre à jour la figure' : 'Insérer dans l’entrée'}
       onSubmit={submit}
       onClose={onClose}

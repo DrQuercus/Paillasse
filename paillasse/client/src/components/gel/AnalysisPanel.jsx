@@ -51,7 +51,7 @@ const TABS = [['lane', 'Piste'], ['compare', 'Comparer'], ['calib', 'Étalonnage
  * de pistes superposées ou empilées, courbe d'étalonnage, tableau de toutes les bandes.
  */
 export default function AnalysisPanel({
-  state, update, commit, profiles, results, activeLaneId, setActiveLaneId, hoverPos, onHover, onPick, pickable, onRenameBand, tab, onTab,
+  state, update, commit, profiles, results, activeLaneId, setActiveLaneId, hoverPos, onHover, onPick, pickable, onRenameBand, tab, onTab, extra = null,
 }) {
   const [localTab, setLocalTab] = useState('lane');
   const current = tab ?? localTab;
@@ -145,6 +145,7 @@ export default function AnalysisPanel({
         {TABS.map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={current === k} className={current === k ? 'is-active' : ''} onClick={() => setTab(k)}>{label}</button>
         ))}
+        {extra}
       </div>
 
       {current === 'lane' && (

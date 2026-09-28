@@ -65,8 +65,3 @@ export const rememberMode = (m) => { try { localStorage.setItem(MODE, m); } catc
 const LADDER = 'paillasse.gel.ladder.';
 export const lastLadder = (kind) => { try { return localStorage.getItem(LADDER + kind); } catch { return null; } };
 export const rememberLadder = (kind, id) => { try { if (id) localStorage.setItem(LADDER + kind, id); } catch { /* sans stockage */ } };
-
-// Présentation de l'atelier : pas à pas (guidé) ou rapide (tout sur un écran)
-const VIEW = 'paillasse.gel.view';
-export const lastView = () => { try { return localStorage.getItem(VIEW) === 'quick' ? 'quick' : 'steps'; } catch { return 'steps'; } };
-export const rememberView = (v) => { try { localStorage.setItem(VIEW, v); } catch { /* sans stockage */ } };

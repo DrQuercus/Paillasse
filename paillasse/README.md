@@ -82,12 +82,18 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   corrige, on les archive. Corriger une masse molaire ne change pas les calculs déjà enregistrés.
 - **Analyse de gels** (menu « Gels », reprise et refonte de SDS-PAGE Analyzer) en trois modes :
   **protéines** (SDS-PAGE : Coomassie, argent, stain-free), **western blot** (chimiluminescence, fluorescence)
-  et **ADN / ARN** (agarose : BET, SYBR, GelRed). Deux présentations, au choix dans l'en-tête de l'atelier :
-  **Rapide** (tous les réglages sur un écran, pistes détectées et dernier marqueur appliqué dès l'ouverture,
-  comme dans l'analyseur d'origine) et **Pas à pas**, guidé en cinq étapes :
+  et **ADN / ARN** (agarose : BET, SYBR, GelRed). Un seul écran, calme : à gauche six **modules** repliables
+  (un seul ouvert à la fois, chacun résumé en une ligne quand il est replié, coché quand il est fait), au
+  centre le gel ou l'aperçu de la figure, à droite le panneau d'analyse. À l'ouverture d'une image, les
+  pistes sont détectées et le dernier marqueur utilisé est appliqué d'office : il ne reste souvent qu'à
+  nommer les pistes. Les réglages rares sont repliés sous leur module (« Contraste et palette »,
+  « Courbure »…), rien n'a été retiré :
   1. *Image* : TIFF 8 ou 16 bits (LZW, Deflate, PackBits, tuiles, flottants), PNG ou JPEG ; quarts de tour,
      miroirs, redressement fin, rognage ; contraste, gamma et palette qui ne touchent jamais aux mesures ;
      bandes sombres ou claires détectées seules ; densité optique pour un Coomassie en transmission.
+     Redresser l'image recale les pistes déjà placées : redétectées si on en retrouve autant (noms et rôles
+     gardés), sinon tournées exactement avec l'image (pistes placées à la main) ; le marqueur est réattribué
+     et un seul Ctrl+Z annule le tout. Un quart de tour ou un miroir redétecte les pistes.
   2. *Pistes* : détection automatique (pistes vides ou à une seule bande comprises) et repérage du marqueur,
      pistes inclinables, largeur commune, zone de migration, correction de courbure (« smile ») par des
      lignes d'égale migration.
@@ -95,32 +101,43 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
      dans la base et modifiables ; attribution automatique des bandes du marqueur, corrigeable au clic ;
      interpolation, régression linéaire ou polynôme sur log(taille), écart de chaque marqueur affiché.
   4. *Bandes* : sensibilité réglable, fond rolling ball, vallée à vallée ou minimum, bandes ajoutées ou
-     retirées à la main ; tableau de toutes les pistes (bandes regroupées par taille, et nommables : GAPDH,
+     retirées à la main.
+  5. *Quantification* : tableau de toutes les pistes (bandes regroupées par taille, et nommables : GAPDH,
      BSA…) en aire, % de la piste (pureté), % d'une piste de référence, normalisation par un contrôle de
      charge, ou quantité (µg, ng) par une gamme étalon (pistes de BSA, ou masses des bandes du marqueur) ;
      rapport molaire des bandes d'une piste ; bandes saturées signalées ; tailles attendues calculées depuis
      le registre (masse de la protéine d'un CDS, fragments d'une PCR ou d'une digestion) et comparées aux
      bandes observées.
-  5. *Figure* : le configurateur de l'encart. Panneaux (gel, profils, étalonnage, gamme) dans l'ordre voulu,
-     en colonne, côte à côte ou en grille, tous à la même échelle ; préréglages Cahier, Article, Diaporama,
-     Noir et blanc ; police, taille du texte, épaisseur des courbes, couleurs ou niveaux de gris, lettres
-     A, B, C. Gel : taille, sans pistes / lignes / cadres, noms des pistes au-dessus ou au-dessous (droits,
-     à 45° ou verticaux), échelle à gauche ou à droite, tailles ou noms des bandes, tailles attendues,
-     flèches annotées, cadre. Profils : superposés ou empilés, normalisés (maximum ou aire totale), axe en
-     tailles ou en migration, légende dedans, à droite ou au-dessus, largeur et hauteur, aires, quadrillage.
-     Téléchargement en PNG, SVG et CSV.
-  À droite de l'atelier, un **panneau d'analyse** redimensionnable : profil de la piste active (courbe lissée
-  ou brute, avec ou sans fond, % de chaque bande, bornes d'intégration à régler à la souris), comparaison
-  de pistes superposées ou empilées et normalisées, courbe d'étalonnage avec l'écart de chaque marqueur,
-  tableau de toutes les bandes. Zoom à la molette, réticule synchronisé avec le gel, export PNG du graphique.
-  Annuler / rétablir (Ctrl+Z / Ctrl+Y) partout ; l'analyse en cours sur la page Gels est gardée dans le
-  navigateur et se reprend après un rechargement.
+  6. *Figure* (l'aperçu remplace le gel au centre) : panneaux (gel, profils, étalonnage, gamme) dans l'ordre
+     voulu, en colonne, côte à côte ou en grille, tous à la même échelle ; préréglages Cahier, Article,
+     Diaporama, Noir et blanc ; police, taille du texte, épaisseur des courbes, couleurs ou niveaux de gris,
+     lettres A, B, C. Gel : taille, sans pistes / lignes / cadres, noms des pistes au-dessus ou au-dessous
+     (droits, à 45° ou verticaux), échelle à gauche ou à droite, tailles ou noms des bandes (écartées, avec
+     un trait de rappel, quand elles sont trop proches), tailles attendues, flèches annotées, cadre.
+     Profils : superposés ou empilés, normalisés (maximum ou aire totale), axe en tailles ou en migration,
+     légende dedans, à droite ou au-dessus, largeur et hauteur, aires, quadrillage.
+  Sur le gel, des repères discrets : axes des pistes en pointillés neutres, seule la piste active en couleur,
+  tailles affichées pour le marqueur et la piste active, sans chevauchement ; l'œil du zoom les masque pour
+  voir le gel nu. Le zoom et la position sont gardés quand on replie ou élargit un panneau. Les messages
+  (pistes trouvées, taille placée…) s'affichent sur une ligne au-dessus du gel au lieu de s'empiler.
+  **Télécharger** (en-tête) : la **figure entière** en un seul fichier — titre, panneaux, tableau et notes —
+  en PNG haute définition ou en SVG (graphiques vectoriels, texte modifiable dans Inkscape ou Illustrator),
+  le gel seul (PNG), les profils (SVG) ou le tableau (CSV, s'ouvre tel quel dans Excel). Tout est produit
+  dans le navigateur.
+  À droite de l'atelier, un **panneau d'analyse** redimensionnable et repliable : profil de la piste active
+  (courbe lissée ou brute, avec ou sans fond, % de chaque bande, bornes d'intégration à régler à la souris),
+  comparaison de pistes superposées ou empilées et normalisées, courbe d'étalonnage avec l'écart de chaque
+  marqueur, tableau de toutes les bandes. Zoom à la molette, réticule synchronisé avec le gel, export PNG du
+  graphique. Annuler / rétablir (Ctrl+Z / Ctrl+Y) partout ; l'analyse en cours sur la page Gels est gardée
+  dans le navigateur et se reprend après un rechargement.
 - **Figure de gel dans une entrée** : bouton « Figure de gel » de la barre d'outils, « Analyser le gel » sur une
   image déjà jointe, ou « Insérer dans une entrée » depuis la page Gels. L'image d'origine est jointe telle
   quelle, les panneaux de la figure deviennent des images jointes qui en dérivent, et l'analyse complète
   (réglages, pistes, étalonnage) est enregistrée dans l'encart. Le tableau et les notes restent du texte :
   scellés avec la version, imprimés, exportés et trouvés par la recherche. « Modifier » rouvre l'atelier tant
-  que l'entrée est un brouillon ; une fois verrouillée, « Reprendre » rouvre l'analyse sur la page Gels.
+  que l'entrée est un brouillon ; une fois verrouillée, « Reprendre » rouvre l'analyse sur la page Gels. Le
+  bouton de téléchargement de l'encart assemble la figure entière (PNG ou SVG) à partir de ses panneaux,
+  même dans une entrée verrouillée.
 - **Statistiques et graphiques** (menu « Statistiques », à la façon de GraphPad Prism) : cinq types de tableaux,
   saisis au clavier ou collés depuis Excel / LibreOffice (virgule décimale acceptée), avec réplicats :
   - *Colonnes* : statistiques descriptives (moyenne, écart-type, SEM, IC 95 %, médiane, quartiles, CV) et
@@ -419,7 +436,8 @@ Corrections par rapport à LabHelper v3 :
 
 Le moteur est dans `client/src/lib/gel/` (sans React) et `npm --prefix client test` le vérifie sur des gels
 synthétiques dont les quantités sont connues (proportions, normalisation d'un western, gamme de BSA,
-tailles après correction de courbure, pistes presque vides), et sur 12 TIFF de référence produits par
+tailles après correction de courbure, pistes presque vides), vérifie l'assemblage de la figure entière
+(`compose.js` : dispositions, tableau, notes, texte échappé) et l'écartement des étiquettes, et sur 12 TIFF de référence produits par
 Pillow (`client/test/make-tiff-fixtures.py` : 8, 16 et 32 bits, LZW, Deflate, PackBits, tuiles, prédicteur,
 palette, MinIsWhite, RGB).
 
@@ -443,6 +461,14 @@ Corrections par rapport à SDS-PAGE Analyzer :
 - une seule piste à la fois, pas d'alerte de saturation, rien d'enregistré, exports en captures d'écran ;
   réglages de détection en pixels (ils dépendent maintenant de la hauteur du gel) ; rapport 1 : 1,5 jamais
   simplifié en 2 : 3.
+
+Corrections de l'atelier lui-même (refonte en modules) : les étiquettes du graphique d'une piste se
+chevauchaient d'une hauteur à l'autre (seules celles d'une même hauteur étaient comparées) ; sur la figure,
+les tailles des bandes et les flèches se superposaient (« DegU-His6 » sur « 29 kDa ») ; la vue du gel se
+réajustait (zoom perdu) à chaque ouverture ou redimensionnement d'un panneau ; les notifications
+s'empilaient ; le gel de la figure était rendu à la résolution d'écran (flou à l'impression : il est
+maintenant dessiné deux fois plus fin, comme les graphiques) ; redresser l'image après la détection
+laissait les pistes calées sur l'image penchée.
 
 ## Statistiques : fiabilité
 
@@ -526,7 +552,7 @@ client/
   src/components/calc/         formulaires, encart dans l'éditeur (LabCalcNode), produits
   src/pages/CalcPage.jsx       page Calculs
   src/lib/gel/                 analyse de gel : TIFF, image, profils, étalonnage, quantification, figure (testés)
-  src/components/gel/          atelier (GelWorkbench : pas à pas ou rapide), panneau d'analyse, encart (GelFigureNode)
+  src/components/gel/          atelier (GelWorkbench, modules/ : un fichier par module), panneau d'analyse, encart (GelFigureNode)
   src/pages/GelPage.jsx        page Gels (analyse libre, marqueurs)
   src/lib/stats/               lois, tests, régressions, ANOVA, contingence, survie, graphiques SVG (testés contre scipy)
   src/components/stats/        atelier (StatWorkbench : tableau, analyse, graphique), encart (StatFigureNode)

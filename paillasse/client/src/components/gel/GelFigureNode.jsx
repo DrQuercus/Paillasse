@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Node, NodeViewWrapper, ReactNodeViewRenderer, mergeAttributes } from '@tiptap/react';
-import { Columns4, FileImage, Pencil, RotateCcw } from 'lucide-react';
+import { Columns4, Download, FileImage, Loader2, Pencil, RotateCcw } from 'lucide-react';
 import { setResume } from '../../lib/gel/draft.js';
 import { panelWidths } from '../../lib/gel/layout.js';
 
@@ -23,6 +23,66 @@ function useEditable(editor) {
   return editable;
 }
 
+/**
+ * Téléchargement de la figure entière (titre, panneaux, tableau, notes) en un seul fichier,
+ * assemblé dans le navigateur à partir des panneaux joints à l'entrée.
+ */
+function FigureDownload({ attrs }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  const run = async (format) => {
+    setOpen(false);
+    setBusy(true);
+    setError(null);
+    try {
+      // Chargé à la demande : l'éditeur n'embarque pas le rendu des figures
+      const { downloadFigureFromEntry } = await import('./figureExport.js');
+      await downloadFigureFromEntry(attrs, format);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="tool-menu gelfig-download" ref={ref}>
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={() => setOpen((o) => !o)}
+        disabled={busy}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={error ?? 'Télécharger la figure entière'}
+        aria-label="Télécharger la figure entière"
+      >
+        {busy ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
+      </button>
+      {open && (
+        <span className="menu menu-right" role="menu">
+          <button type="button" role="menuitem" className="menu-item menu-item-2" onClick={() => run('png')}>
+            <span><strong>Figure entière (PNG)</strong><span>Haute définition, pour une présentation</span></span>
+          </button>
+          <button type="button" role="menuitem" className="menu-item menu-item-2" onClick={() => run('svg')}>
+            <span><strong>Figure entière (SVG)</strong><span>Texte et tableau modifiables (Inkscape, Illustrator)</span></span>
+          </button>
+        </span>
+      )}
+      {error && <span className="gelfig-error" role="alert">{error}</span>}
+    </span>
+  );
+}
+
 function GelFigureView({ node, editor, updateAttributes }) {
   const editable = useEditable(editor);
   const { analysis, images, summary, layout, width } = node.attrs;
@@ -40,6 +100,7 @@ function GelFigureView({ node, editor, updateAttributes }) {
           <Columns4 size={17} aria-hidden="true" />
           <span className="gelfig-title"><strong>{s.title ?? 'Figure de gel'}</strong>{s.mode && <span className="muted"> — {s.mode}</span>}</span>
           <span className="calc-card-actions">
+            {(images ?? []).length > 0 && <FigureDownload attrs={node.attrs} />}
             {sourceId && (
               <a className="icon-btn" href={`/api/files/${sourceId}?download=1`} title={`Image d’origine : ${analysis.source.filename ?? ''}`} aria-label="Télécharger l’image d’origine">
                 <FileImage size={15} />
