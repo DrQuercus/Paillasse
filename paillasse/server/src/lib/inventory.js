@@ -4,12 +4,14 @@
 
 export const UNIT_KINDS = {
   room: { label: 'Pièce', children: ['freezer', 'fridge', 'tank', 'cabinet'] },
-  freezer: { label: 'Congélateur', appliance: true, temperature: -80, children: ['shelf', 'rack', 'box', 'bag'] },
-  fridge: { label: 'Réfrigérateur', appliance: true, temperature: 4, children: ['shelf', 'rack', 'box', 'bag'] },
+  freezer: { label: 'Congélateur', appliance: true, temperature: -80, children: ['shelf', 'rack', 'drawer', 'box', 'bag'] },
+  fridge: { label: 'Réfrigérateur', appliance: true, temperature: 4, children: ['shelf', 'rack', 'drawer', 'box', 'bag'] },
   tank: { label: 'Cuve d’azote liquide', appliance: true, temperature: -196, children: ['canister', 'rack', 'box', 'bag'] },
-  cabinet: { label: 'Armoire', appliance: true, temperature: 20, children: ['shelf', 'rack', 'box', 'bag'] },
-  shelf: { label: 'Étagère', children: ['rack', 'box', 'bag'] },
-  rack: { label: 'Rack', children: ['box', 'bag'] },
+  cabinet: { label: 'Armoire', appliance: true, temperature: 20, children: ['shelf', 'rack', 'drawer', 'box', 'bag'] },
+  shelf: { label: 'Étagère', children: ['rack', 'drawer', 'box', 'bag'] },
+  // Congélateur −80 : étagère › rack › tiroir › boîte (un rack à tiroirs, chaque tiroir tient quelques boîtes)
+  rack: { label: 'Rack', children: ['drawer', 'box', 'bag'] },
+  drawer: { label: 'Tiroir', children: ['box', 'bag'] },
   box: { label: 'Boîte', holdsSamples: true, children: [] },
   bag: { label: 'Sac', holdsSamples: true, children: [] },
   // Cryo-EM : dewar › canister › puck › boîte à grilles › grille
@@ -257,10 +259,11 @@ export function cleanUnit(body, { partial = false, kind } = {}) {
 }
 
 /**
- * Aménagement rapide d'un appareil : étagères × racks × boîtes (ou tours × boîtes pour une cuve).
+ * Aménagement rapide d'un appareil : étagères × racks × tiroirs × boîtes (ou tours × boîtes pour une cuve).
+ * Chaque niveau est facultatif (0 : les boîtes vont directement dans le niveau du dessus).
  * Renvoie la liste des contenants à créer, du haut vers le bas : [{ key, parentKey, kind, name, rows?, cols?, sort }].
  */
-export function quickLayout({ shelves = 0, racks = 0, boxes = 0, rows = 9, cols = 9, canisters = 0, pucks = 0, firstPuck = 1, puckSlots = 12 }, applianceKind) {
+export function quickLayout({ shelves = 0, racks = 0, drawers = 0, boxes = 0, rows = 9, cols = 9, canisters = 0, pucks = 0, firstPuck = 1, puckSlots = 12 }, applianceKind) {
   const n = (v, max) => Math.max(0, Math.min(max, Math.trunc(Number(v)) || 0));
   // Dewar de cryo-EM : canisters numérotés 1, 2, 3…, chacun rempli de pucks numérotés à la suite
   if (applianceKind === 'tank' && n(canisters, 30)) {
@@ -281,18 +284,27 @@ export function quickLayout({ shelves = 0, racks = 0, boxes = 0, rows = 9, cols 
   }
   const S = applianceKind === 'tank' ? 0 : n(shelves, 20);
   const R = n(racks, 20);
+  const D = applianceKind === 'tank' ? 0 : n(drawers, 20);
   const B = n(boxes, 30);
   const out = [];
   const rackWord = applianceKind === 'tank' ? 'Tour' : 'Rack';
   const addBoxes = (parentKey, prefix) => {
     for (let k = 1; k <= B; k += 1) out.push({ key: `${parentKey}/b${k}`, parentKey, kind: 'box', name: `${prefix}Boîte ${k}`, rows: n(rows, 26) || 9, cols: n(cols, 30) || 9, sort: k });
   };
+  const addDrawers = (parentKey, prefix) => {
+    if (!D) { addBoxes(parentKey, prefix); return; }
+    for (let d = 1; d <= D; d += 1) {
+      const key = `${parentKey}/d${d}`;
+      out.push({ key, parentKey, kind: 'drawer', name: `Tiroir ${d}`, sort: d });
+      addBoxes(key, '');
+    }
+  };
   const addRacks = (parentKey, prefix) => {
-    if (!R) { addBoxes(parentKey, prefix); return; }
+    if (!R) { addDrawers(parentKey, prefix); return; }
     for (let r = 1; r <= R; r += 1) {
       const key = `${parentKey}/r${r}`;
       out.push({ key, parentKey, kind: 'rack', name: `${rackWord} ${String.fromCharCode(64 + r)}`, sort: r });
-      addBoxes(key, '');
+      addDrawers(key, '');
     }
   };
   if (S) {

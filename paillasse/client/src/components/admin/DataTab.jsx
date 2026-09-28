@@ -217,7 +217,7 @@ function SequencesSection() {
   );
 }
 
-const KIND_LABELS = { room: 'pièce', freezer: 'congélateur', fridge: 'réfrigérateur', tank: 'cuve ou dewar', cabinet: 'armoire', shelf: 'étagère', rack: 'rack', box: 'boîte', bag: 'sac', canister: 'canister', puck: 'puck', gridbox: 'boîte à grilles' };
+const KIND_LABELS = { room: 'pièce', freezer: 'congélateur', fridge: 'réfrigérateur', tank: 'cuve ou dewar', cabinet: 'armoire', shelf: 'étagère', rack: 'rack', drawer: 'tiroir', box: 'boîte', bag: 'sac', canister: 'canister', puck: 'puck', gridbox: 'boîte à grilles' };
 
 function StorageSection() {
   const [data, setData] = useState(null);

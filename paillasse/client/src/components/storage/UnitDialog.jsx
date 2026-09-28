@@ -13,8 +13,8 @@ import { GridboxBody } from './cryo.jsx';
 
 // Appareils proposés à la création, avec leur réglage d'usine
 export const APPLIANCE_PRESETS = [
-  { key: 'm80', kind: 'freezer', temperature: -80, style: 'upright', label: 'Congélateur −80 °C', layout: { shelves: 5, racks: 4, boxes: 5 } },
-  { key: 'm20', kind: 'freezer', temperature: -20, style: 'upright', label: 'Congélateur −20 °C', layout: { shelves: 4, racks: 0, boxes: 6 } },
+  { key: 'm80', kind: 'freezer', temperature: -80, style: 'upright', label: 'Congélateur −80 °C', layout: { shelves: 5, racks: 4, drawers: 4, boxes: 4 } },
+  { key: 'm20', kind: 'freezer', temperature: -20, style: 'upright', label: 'Congélateur −20 °C', layout: { shelves: 0, racks: 0, drawers: 6, boxes: 6 } },
   { key: 'p4', kind: 'fridge', temperature: 4, style: '', label: 'Réfrigérateur +4 °C', layout: { shelves: 4, racks: 0, boxes: 4 } },
   { key: 'cryoem', kind: 'tank', temperature: -196, style: '', label: 'Dewar cryo-EM (grilles)', layout: { canisters: 6, pucks: 5, firstPuck: 1 } },
   { key: 'ln2', kind: 'tank', temperature: -196, style: '', label: 'Cuve d’azote (cryotubes)', layout: { shelves: 0, racks: 6, boxes: 10, rows: 10, cols: 10 } },
@@ -38,6 +38,7 @@ export function defaultName(kind, siblings, parentKind, all = []) {
   const n = siblings.filter((s) => s.kind === kind).length + 1;
   if (kind === 'rack') return `${kindLabel('rack', parentKind)} ${String.fromCharCode(64 + Math.min(26, n))}`;
   if (kind === 'shelf') return `Étagère ${n}`;
+  if (kind === 'drawer') return `Tiroir ${n}`;
   if (kind === 'box') return `Boîte ${n}`;
   if (kind === 'bag') return n > 1 ? `Sac ${n}` : 'Sac';
   if (kind === 'room') return '';
@@ -267,12 +268,13 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
             <legend>Aménagement rapide (facultatif)</legend>
             <div className="layout-inputs">
               {kind !== 'tank' && <label><input type="number" min="0" max="20" value={layout.shelves ?? 0} onChange={setL('shelves')} /> étagères</label>}
-              <label><input type="number" min="0" max="20" value={layout.racks ?? 0} onChange={setL('racks')} /> {kind === 'tank' ? 'tours' : `racks${kind !== 'tank' && layout.shelves ? ' par étagère' : ''}`}</label>
-              <label><input type="number" min="0" max="30" value={layout.boxes ?? 0} onChange={setL('boxes')} /> boîtes{layout.racks ? ` par ${kind === 'tank' ? 'tour' : 'rack'}` : layout.shelves ? ' par étagère' : ''}</label>
+              <label><input type="number" min="0" max="20" value={layout.racks ?? 0} onChange={setL('racks')} /> {kind === 'tank' ? 'tours' : `racks${layout.shelves ? ' par étagère' : ''}`}</label>
+              {kind !== 'tank' && <label><input type="number" min="0" max="20" value={layout.drawers ?? 0} onChange={setL('drawers')} /> tiroirs{layout.racks ? ' par rack' : layout.shelves ? ' par étagère' : ''}</label>}
+              <label><input type="number" min="0" max="30" value={layout.boxes ?? 0} onChange={setL('boxes')} /> boîtes{kind !== 'tank' && layout.drawers ? ' par tiroir' : layout.racks ? ` par ${kind === 'tank' ? 'tour' : 'rack'}` : layout.shelves ? ' par étagère' : ''}</label>
               <Segmented label="Boîtes" value={size} onChange={setSize} options={BOX_SIZES.slice(0, 2)} />
             </div>
             <LayoutPreview plan={plan} kind={kind} />
-            <small className="hint">Tout reste modifiable ensuite : on ajoute, renomme ou déplace étagères, racks et boîtes.</small>
+            <small className="hint">Chaque niveau est facultatif (0 : les boîtes vont directement au niveau du dessus). Tout reste modifiable ensuite : on ajoute, renomme ou déplace étagères, racks, tiroirs et boîtes.</small>
           </fieldset>
         )}
         {editing && destinations.length > 0 && (
@@ -294,15 +296,17 @@ export default function UnitDialog({ create = null, unit = null, tree, onClose, 
   );
 }
 
-/** Schéma de l'aménagement prévu : étagères, racks, boîtes. */
+/** Schéma de l'aménagement prévu : étagères, racks, tiroirs, boîtes. */
 function LayoutPreview({ plan, kind }) {
   if (!plan.length) return null;
   const shelves = plan.filter((p) => p.kind === 'shelf');
   const kids = (key) => plan.filter((p) => (p.parentKey || '') === key);
   const renderBoxes = (key) => kids(key).filter((p) => p.kind === 'box').slice(0, 12).map((b) => <span key={b.key} className="lp-box" />);
+  const renderDrawers = (key) => kids(key).filter((p) => p.kind === 'drawer').slice(0, 10).map((d) => <span key={d.key} className="lp-drawer">{renderBoxes(d.key)}</span>);
   const renderRow = (key) => (
     <div className="lp-row">
-      {kids(key).filter((p) => p.kind === 'rack').map((r) => <span key={r.key} className="lp-rack">{renderBoxes(r.key)}</span>)}
+      {kids(key).filter((p) => p.kind === 'rack').map((r) => <span key={r.key} className="lp-rack">{renderDrawers(r.key)}{renderBoxes(r.key)}</span>)}
+      {renderDrawers(key)}
       {renderBoxes(key)}
     </div>
   );

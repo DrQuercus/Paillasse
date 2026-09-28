@@ -10,9 +10,21 @@ export const TYPE_ICONS = {
   plasmid: CircleDot, strain: Bug, cells: Grape, protein: Atom, antibody: GitFork, dna: Dna,
   rna: AudioWaveform, oligo: Ellipsis, tissue: Droplet, reagent: TestTube, grid: Aperture, other: Package,
 };
+/** Tiroir (façade et poignée), dessiné comme les icônes lucide : lucide n'en a pas. */
+export function DrawerIcon({ size = 24, strokeWidth = 2, className = '', ...rest }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={`lucide lucide-drawer ${className}`} {...rest}>
+      <path d="M4 8V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3" />
+      <rect x="2" y="8" width="20" height="12" rx="2" />
+      <path d="M9 13h6" />
+    </svg>
+  );
+}
+
 export const KIND_ICONS = {
   room: DoorOpen, freezer: Snowflake, fridge: Refrigerator, tank: Container, cabinet: LibraryBig,
-  shelf: Rows3, rack: Layers, box: Grid3x3, bag: ShoppingBag, canister: Cylinder, puck: Disc3, gridbox: Grid2x2,
+  shelf: Rows3, rack: Layers, drawer: DrawerIcon, box: Grid3x3, bag: ShoppingBag, canister: Cylinder, puck: Disc3, gridbox: Grid2x2,
 };
 
 // Couleurs de boîtes (carton ou plastique des boîtes de congélation)

@@ -368,7 +368,8 @@ code, .hash { font-family: var(--mono); font-size: .82em; }
 
 @media (max-width: 860px) {
   :root { --sheet-pad-left: 44px; --sheet-margin-x: 28px; }
-  .app { grid-template-columns: minmax(0, 1fr); }
+  /* Barre du haut à sa hauteur, la page prend le reste (sinon une page courte étire la barre) */
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .topbar {
     position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between;
     padding: .5rem .75rem; background: var(--side); border-bottom: 1px solid var(--line);
@@ -2177,3 +2178,48 @@ a.menu-item { color: var(--ink); text-decoration: none; }
   .export-menu .menu { position: fixed; top: auto; left: 1rem; right: 1rem; min-width: 0; }
   .modal-foot .export-menu .menu { bottom: 5rem; }
 }
+
+/* ---------- Tiroirs (rack à tiroirs d'un −80, tiroirs d'un −20) ---------- */
+.rack-add { display: flex; flex-wrap: wrap; gap: .25rem; }
+.rack.has-drawers .rack-slots { gap: .3rem; }
+.drawer {
+  display: flex; flex-direction: column; gap: .25rem; padding: .25rem .3rem .3rem; min-width: 148px;
+  background: linear-gradient(180deg, #F7F9FC, #E3E9F1); border: 1px solid #A9B6C7; border-radius: 5px;
+  box-shadow: inset 0 -2px 0 rgba(29, 41, 64, .08); cursor: grab;
+}
+.rack .drawer { min-width: 0; }
+.drawer.is-drop { border-color: var(--blue); background: var(--blue-soft); }
+.drawer-front {
+  display: flex; align-items: center; gap: .4rem; width: 100%; padding: 0 .1rem; border: 0; background: none;
+  font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+}
+.drawer-name { flex: 1; min-width: 0; font-size: .78rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-front:hover .drawer-name { color: var(--blue); }
+.drawer-handle { flex: none; width: 22px; height: 6px; border-radius: 3px; background: linear-gradient(180deg, #CBD5E1, #8A99AD); box-shadow: 0 1px 0 #fff; }
+.drawer-boxes { display: flex; flex-wrap: wrap; gap: 3px; }
+.drawer-box {
+  flex: 1 1 26px; min-width: 22px; max-width: 44px; height: 22px; padding: 0 2px; overflow: hidden;
+  border: 1px solid rgba(29, 41, 64, .22); border-radius: 3px; font: inherit; font-size: .66rem; font-weight: 600; color: var(--ink);
+  white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+  /* Remplissage de la boîte : la couleur monte avec le nombre de tubes */
+  background: linear-gradient(0deg, var(--box) calc(var(--fill) * 100%), #fff calc(var(--fill) * 100%));
+}
+.drawer-box.is-bag { background: #FFF7E6; border-color: #E6CFA0; border-radius: 3px 3px 8px 8px; }
+.drawer-box:hover, .drawer-box:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.drawer .fill-bar { width: 100%; height: 3px; }
+/* Tiroir ouvert : bandeau comme une étagère, façade et poignée en bas */
+.shelf-band.is-drawer { background: rgba(255, 255, 255, .45); border: 1px solid rgba(169, 182, 199, .7); padding-bottom: 0; }
+.shelf-band.is-drawer .shelf-head svg { color: var(--ink-2); }
+.shelf-band.is-drawer .shelf-head .fill-bar { width: 90px; }
+.drawer-panel {
+  display: flex; justify-content: center; align-items: center; height: 16px; margin: 0 -.45rem; border-radius: 0 0 9px 9px;
+  background: linear-gradient(180deg, #EEF2F7, #CBD5E1); border-top: 1px solid #A9B6C7;
+}
+.drawer-panel .drawer-handle { width: 46px; }
+.lp-rack:has(.lp-drawer) { flex-direction: column; gap: 2px; }
+.lp-drawer { display: inline-flex; gap: 1px; padding: 1px; border: 1px solid #A9B6C7; border-radius: 2px; background: #EEF2F7; }
+.lp-drawer .lp-box { width: 6px; height: 6px; }
+.lp-row > .lp-drawer .lp-box { width: 10px; height: 10px; }
+.drawerize-list { margin: 0; padding-left: 1.2rem; font-size: .88rem; color: var(--ink-2); columns: 2; }
+.field.field-inline { flex-direction: row; align-items: center; gap: .6rem; }
+.field.field-inline input { width: 6rem; }

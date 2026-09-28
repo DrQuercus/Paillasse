@@ -159,9 +159,14 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   Statistiques.
 - **Stockage des échantillons** (menu « Stockage ») : chaque tube a une adresse, comme une rue et un numéro.
   Le labo est dessiné : pièces, congélateurs −80 °C et −20 °C (armoire ou coffre), réfrigérateurs, cuves d'azote
-  liquide, armoires, dont la porte s'ouvre au survol ; dedans, étagères, racks (ou tours de cuve) et boîtes,
-  créés d'un coup à l'installation (« 5 étagères × 4 racks × 5 boîtes de 9 × 9 ») puis réorganisés par
-  glisser-déposer. Une boîte s'affiche en grand, avec son **coin coupé = A1** et des bouchons de couleur (par type
+  liquide, armoires, dont la porte s'ouvre au survol ; dedans, étagères, racks (ou tours de cuve), **tiroirs** et
+  boîtes, créés d'un coup à l'installation (−80 : « 5 étagères × 4 racks × 4 tiroirs × 4 boîtes de 9 × 9 » ;
+  −20 : des tiroirs directement dans l'appareil ; chaque niveau est facultatif) puis réorganisés par
+  glisser-déposer. Dans un rack, les tiroirs sont dessinés comme des façades empilées (poignée, boîtes en pastilles
+  qui se remplissent de couleur avec les tubes, un clic ouvre la boîte) ; ouvrir un rack ou un tiroir montre ses
+  tiroirs sortis avec leurs boîtes en grand. Pour un −80 saisi avant les tiroirs, « Ranger les boîtes des racks dans
+  des tiroirs… » crée les tiroirs de chaque rack et y répartit ses boîtes dans l'ordre (n boîtes par tiroir) ; les
+  tubes restent à leur place, seul leur chemin gagne le tiroir (… › Rack A › Tiroir 2 › Boîte 5 › C3). Une boîte s'affiche en grand, avec son **coin coupé = A1** et des bouchons de couleur (par type
   ou choisie) : un clic sur une case vide range un ou plusieurs tubes (les aliquots vont aux places libres
   suivantes, montrées avant de valider), un tube se glisse vers une autre case (sur un autre tube : échange),
   Ctrl+clic ou Maj+clic en prend plusieurs (sortir, remettre, recolorer, déplacer vers une autre boîte, jeter).

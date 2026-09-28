@@ -29,6 +29,15 @@ test('qui peut contenir quoi', () => {
   assert.ok(!canContain('tank', 'shelf'));
   assert.ok(!canContain('box', 'box'));
   assert.ok(!canContain(null, 'box'));
+  // Tiroirs : rack › tiroir › boîte (−80), sur une étagère ou directement dans un appareil ; pas dans une cuve
+  assert.ok(canContain('rack', 'drawer'));
+  assert.ok(canContain('shelf', 'drawer'));
+  assert.ok(canContain('freezer', 'drawer'));
+  assert.ok(canContain('drawer', 'box'));
+  assert.ok(canContain('drawer', 'bag'));
+  assert.ok(!canContain('drawer', 'rack'));
+  assert.ok(!canContain('drawer', 'drawer'));
+  assert.ok(!canContain('tank', 'drawer'));
 });
 
 test('chemin, texte de l’emplacement et cycles', () => {
@@ -78,6 +87,22 @@ test('aménagement rapide : étagères × racks × boîtes, tours pour une cuve'
   assert.equal(tank.filter((p) => p.kind === 'shelf').length, 0);
   assert.equal(tank.find((p) => p.kind === 'rack').name, 'Tour A');
   assert.equal(tank.find((p) => p.kind === 'box').rows, 10);
+});
+
+test('aménagement rapide avec tiroirs : étagère › rack › tiroir › boîte', () => {
+  const plan = quickLayout({ shelves: 2, racks: 3, drawers: 4, boxes: 5 }, 'freezer');
+  const count = (k) => plan.filter((p) => p.kind === k).length;
+  assert.deepEqual([count('shelf'), count('rack'), count('drawer'), count('box')], [2, 6, 24, 120]);
+  const byKey = new Map(plan.map((p) => [p.key, p]));
+  assert.ok(plan.filter((p) => p.kind === 'drawer').every((d) => byKey.get(d.parentKey).kind === 'rack'));
+  assert.ok(plan.filter((p) => p.kind === 'box').every((b) => byKey.get(b.parentKey).kind === 'drawer'));
+  assert.deepEqual(plan.slice(0, 4).map((p) => p.name), ['Étagère 1', 'Rack A', 'Tiroir 1', 'Boîte 1']);
+  // Sans rack : tiroirs directement dans l'appareil (congélateur −20 à tiroirs)
+  const m20 = quickLayout({ drawers: 6, boxes: 6 }, 'freezer');
+  assert.deepEqual([m20.filter((p) => p.kind === 'drawer').length, m20.filter((p) => p.kind === 'box').length], [6, 36]);
+  assert.ok(m20.filter((p) => p.kind === 'drawer').every((d) => !d.parentKey));
+  // Une cuve d'azote n'a pas de tiroirs, même demandés
+  assert.equal(quickLayout({ racks: 2, drawers: 3, boxes: 2 }, 'tank').filter((p) => p.kind === 'drawer').length, 0);
 });
 
 test('export : stockage.csv lisible dans un tableur', async () => {

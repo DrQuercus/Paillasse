@@ -94,7 +94,7 @@ export default function StoragePage() {
       <header className="stor-head">
         <div>
           <h1>Stockage</h1>
-          <p className="page-lead">Chaque tube et chaque grille a son adresse : appareil, étagère ou canister, rack ou puck, boîte, position.</p>
+          <p className="page-lead">Chaque tube et chaque grille a son adresse : appareil, étagère, rack, tiroir ou canister et puck, boîte, position.</p>
         </div>
         <WhereIs onFound={showSample} />
       </header>

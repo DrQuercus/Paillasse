@@ -151,7 +151,7 @@ router.post('/units', async (req, res) => {
     // Aménagement rapide : étagères, racks et boîtes, ou canisters et pucks, créés d'un coup
     if (UNIT_KINDS[kind].appliance && b.layout) {
       const plan = quickLayout(b.layout, kind);
-      if (plan.length > 600) throw new HttpError(400, 'Aménagement trop grand (600 contenants au plus d’un coup).');
+      if (plan.length > 1200) throw new HttpError(400, 'Aménagement trop grand (1 200 contenants au plus d’un coup).');
       const ids = new Map([['', unit.id]]);
       for (const p of plan) {
         const { rows: [c] } = await db.query(
@@ -228,6 +228,44 @@ router.put('/units/:id', async (req, res) => {
     return u;
   });
   res.json(updated);
+});
+
+/**
+ * Ranger dans des tiroirs les boîtes posées à même les racks (un −80 saisi avant que les tiroirs existent) :
+ * chaque rack de ce contenant (ou ce rack lui-même) qui n'a pas encore de tiroir voit ses boîtes et sacs passer,
+ * dans l'ordre, dans des tiroirs de per_drawer boîtes (« Tiroir 1 », « Tiroir 2 »…). Les tubes ne bougent pas
+ * de leur boîte. Les tours d'une cuve d'azote ne sont pas concernées.
+ */
+router.post('/units/:id/drawers', async (req, res) => {
+  const per = Math.trunc(Number(req.body?.per_drawer));
+  if (!(per >= 1 && per <= 30)) throw new HttpError(400, 'De 1 à 30 boîtes par tiroir.');
+  const result = await tx(async (db) => {
+    const { list, byId } = await loadUnits(db);
+    const root = byId.get(req.params.id);
+    if (!root) throw notFound('Contenant');
+    const out = { racks: 0, drawers: 0, boxes: 0 };
+    const racks = list.filter((u) => u.kind === 'rack' && isInside(byId, u.id, root.id)
+      && !unitPath(byId, u.id).some((p) => p.kind === 'tank'));
+    for (const rack of racks) {
+      const kids = list.filter((u) => u.parent_id === rack.id).sort((a, b) => a.sort - b.sort);
+      const boxes = kids.filter((u) => u.kind === 'box' || u.kind === 'bag');
+      if (!boxes.length || kids.some((u) => u.kind === 'drawer')) continue;
+      out.racks += 1;
+      for (let k = 0; k * per < boxes.length; k += 1) {
+        const { rows: [d] } = await db.query(
+          `INSERT INTO storage_units (parent_id, kind, name, sort, created_by, updated_by) VALUES ($1, 'drawer', $2, $3, $4, $4) RETURNING id`,
+          [rack.id, `Tiroir ${k + 1}`, k + 1, req.user.id],
+        );
+        out.drawers += 1;
+        for (const [j, box] of boxes.slice(k * per, (k + 1) * per).entries()) {
+          await db.query('UPDATE storage_units SET parent_id = $2, sort = $3, updated_by = $4, updated_at = now() WHERE id = $1', [box.id, d.id, j + 1, req.user.id]);
+          out.boxes += 1;
+        }
+      }
+    }
+    return out;
+  });
+  res.json(result);
 });
 
 // Un contenant se retire une fois vide (ni tube, ni sous-contenant)
