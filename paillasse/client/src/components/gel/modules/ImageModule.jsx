@@ -33,11 +33,13 @@ export default function ImageModule({ ctx }) {
   const p = state.prep;
   const display = state.display ?? {};
   const setDisplay = (patch, opts) => update((s) => ({ ...s, display: { ...s.display, ...patch } }), opts);
-  // Quart de tour, miroir : les pistes sont redétectées sur la nouvelle image (Ctrl+Z pour revenir)
+  // Quart de tour, miroir : les pistes sont retirées, et redétectées en tout auto (Ctrl+Z pour revenir)
   const reorient = (patch) => {
     const had = state.lanes.length > 0;
     update((s) => ({ ...clearGeometry(s), prep: { ...s.prep, ...patch, crop: null } }));
-    if (had) ctx.afterImage((c) => { if (detectLanesInto(c, { quiet: true, amend: true })) say('Pistes redétectées sur l’image tournée (Ctrl+Z pour revenir).'); });
+    if (!had) return;
+    if (ctx.autoMode) ctx.afterImage((c) => { if (detectLanesInto(c, { quiet: true, amend: true })) say('Pistes redétectées sur l’image tournée (Ctrl+Z pour revenir).'); });
+    else say('Image tournée : pistes retirées. « Détecter » dans Pistes pour les replacer (Ctrl+Z pour revenir).');
   };
   const turn = (by) => reorient({ rotate90: ((p.rotate90 ?? 0) + by + 360) % 360 });
 

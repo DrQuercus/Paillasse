@@ -13,11 +13,11 @@ import LaddersPanel from '../components/gel/LaddersPanel.jsx';
 import useLadders from '../components/gel/useLadders.js';
 import { renderFigure, uploadFigure } from '../components/gel/figureExport.js';
 
-// Les modules de l'atelier, tous sur un même écran ; pistes et marqueur sont posés d'office à l'ouverture
+// Les modules de l'atelier, tous sur un même écran ; en mode « Tout auto », pistes et marqueur sont posés d'office
 const MODULES = [
   ['Image', 'orientation, redressement, rognage, contraste'],
-  ['Pistes', 'détectées d’office, inclinées, courbure corrigée'],
-  ['Tailles', 'dernier marqueur appliqué d’office, courbe d’étalonnage'],
+  ['Pistes', 'détection automatique, pistes inclinées, courbure corrigée'],
+  ['Tailles', 'marqueur, attribution automatique, courbe d’étalonnage'],
   ['Bandes', 'sensibilité, fond, corrections à la main'],
   ['Quantification', 'normalisation, gamme étalon, tailles attendues'],
   ['Figure', 'gel, profils, tableau : insérée dans une entrée ou téléchargée (PNG, SVG)'],
@@ -156,6 +156,7 @@ export default function GelPage() {
             {MODULES.map(([title, text], i) => <li key={title}><span className="gel-step-num">{i + 1}</span><strong>{title}</strong> <span className="muted">— {text}</span></li>)}
           </ol>
           <p className="hint">
+            Mode « Tout auto » (en haut à gauche de l’atelier) : pistes détectées et dernier marqueur appliqué dès l’ouverture.
             Les mesures se font toujours sur les intensités brutes de l’image : contraste et palette ne changent pas les aires.
             Depuis une entrée, le bouton <Upload size={12} aria-hidden="true" /> « Figure de gel » de la barre d’outils ouvre le même atelier.
           </p>

@@ -61,6 +61,11 @@ const MODE = 'paillasse.gel.mode';
 export const lastMode = () => { try { return localStorage.getItem(MODE) || 'protein'; } catch { return 'protein'; } };
 export const rememberMode = (m) => { try { localStorage.setItem(MODE, m); } catch { /* sans stockage */ } };
 
+// Mode d'analyse : manuel (chaque étape à la demande) ou « tout auto » (pistes, marqueur, recalages d'office)
+const AUTO = 'paillasse.gel.auto';
+export const lastAuto = () => { try { return localStorage.getItem(AUTO) === '1'; } catch { return false; } };
+export const rememberAuto = (on) => { try { localStorage.setItem(AUTO, on ? '1' : '0'); } catch { /* sans stockage */ } };
+
 // Dernier marqueur utilisé pour chaque sorte de gel (protéines, ADN) : proposé d'office au gel suivant
 const LADDER = 'paillasse.gel.ladder.';
 export const lastLadder = (kind) => { try { return localStorage.getItem(LADDER + kind); } catch { return null; } };

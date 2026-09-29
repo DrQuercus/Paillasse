@@ -84,16 +84,18 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   **protéines** (SDS-PAGE : Coomassie, argent, stain-free), **western blot** (chimiluminescence, fluorescence)
   et **ADN / ARN** (agarose : BET, SYBR, GelRed). Un seul écran, calme : à gauche six **modules** repliables
   (un seul ouvert à la fois, chacun résumé en une ligne quand il est replié, coché quand il est fait), au
-  centre le gel ou l'aperçu de la figure, à droite le panneau d'analyse. À l'ouverture d'une image, les
-  pistes sont détectées et le dernier marqueur utilisé est appliqué d'office : il ne reste souvent qu'à
-  nommer les pistes. Les réglages rares sont repliés sous leur module (« Contraste et palette »,
-  « Courbure »…), rien n'a été retiré :
+  centre le gel ou l'aperçu de la figure, à droite le panneau d'analyse. Deux modes, au choix en haut des
+  modules (et gardés dans le navigateur) : **Manuel**, par défaut, où chaque étape se lance à la demande
+  (« Détecter » les pistes, choisir le marqueur), et **Tout auto**, où les pistes sont détectées et le dernier
+  marqueur utilisé appliqué dès l'ouverture (il ne reste souvent qu'à nommer les pistes), puis redétectées
+  après un redressement ou un quart de tour. Les réglages rares sont repliés sous leur module
+  (« Contraste et palette », « Courbure »…), rien n'a été retiré :
   1. *Image* : TIFF 8 ou 16 bits (LZW, Deflate, PackBits, tuiles, flottants), PNG ou JPEG ; quarts de tour,
      miroirs, redressement fin, rognage ; contraste, gamma et palette qui ne touchent jamais aux mesures ;
      bandes sombres ou claires détectées seules ; densité optique pour un Coomassie en transmission.
-     Redresser l'image recale les pistes déjà placées : redétectées si on en retrouve autant (noms et rôles
-     gardés), sinon tournées exactement avec l'image (pistes placées à la main) ; le marqueur est réattribué
-     et un seul Ctrl+Z annule le tout. Un quart de tour ou un miroir redétecte les pistes.
+     Redresser l'image recale les pistes déjà placées : tournées exactement avec l'image (en tout auto,
+     redétectées si on en retrouve autant, noms et rôles gardés) ; le marqueur est réattribué et un seul
+     Ctrl+Z annule le tout. Un quart de tour ou un miroir retire les pistes (redétectées en tout auto).
   2. *Pistes* : détection automatique (pistes vides ou à une seule bande comprises) et repérage du marqueur,
      pistes inclinables, largeur commune, zone de migration, correction de courbure (« smile ») par des
      lignes d'égale migration.

@@ -4,7 +4,7 @@ import { useApp } from '../../context.js';
 import { MODES, computeProfiles, computeResults, newId, shiftGeometry, suggestCalibration, switchMode } from '../../lib/gel/model.js';
 import { formatSize } from '../../lib/gel/calibration.js';
 import { renderToCanvas, signalRange } from '../../lib/gel/render.js';
-import { lastLadder } from '../../lib/gel/draft.js';
+import { lastAuto, lastLadder, rememberAuto } from '../../lib/gel/draft.js';
 import Modal from '../Modal.jsx';
 import { ModuleCard, Segmented } from './controls.jsx';
 import GelCanvas from './GelCanvas.jsx';
@@ -50,8 +50,11 @@ export default function GelWorkbench({ source, initial, initialModule, submitLab
   const a = useGelAnalysis(source, initial, getCtx);
   const { state, update, commit, undo, redo, canUndo, canRedo, img, uncropped, profiles, results, polarity } = a;
   const fresh = useRef(!initial?.lanes?.length);
+  // Manuel : chaque étape se lance à la demande. Tout auto : pistes détectées, dernier marqueur appliqué,
+  // pistes redétectées après un redressement ou un quart de tour. Choix gardé dans ce navigateur.
+  const [autoMode, setAutoModeState] = useState(lastAuto);
 
-  const [openKey, setOpenKey] = useState(() => initialModule ?? (fresh.current ? 'lanes' : 'bands'));
+  const [openKey, setOpenKey] = useState(() => initialModule ?? (fresh.current ? (autoMode ? 'lanes' : 'image') : 'bands'));
   const [view, setView] = useState(() => (initialModule === 'figure' ? 'figure' : 'gel'));
   const [tool, setToolState] = useState('select');
   const [activeLaneId, setActiveLaneId] = useState(() => state.lanes.find((l) => l.role !== 'ladder')?.id ?? state.lanes[0]?.id ?? null);
@@ -199,28 +202,33 @@ export default function GelWorkbench({ source, initial, initialModule, submitLab
   // Bandes du marqueur à réattribuer dès que les pistes (re)détectées sont lues
   const wantAssign = useRef(false);
   const requestAssign = useCallback(() => { wantAssign.current = true; }, []);
-  // Image redressée : les pistes sont recalées, dans la même étape de l'historique. Redétectées si on en
-  // retrouve autant (noms et rôles gardés), sinon tournées avec l'image (pistes placées à la main).
+  // Image redressée : les pistes sont recalées, dans la même étape de l'historique. Tournées exactement
+  // avec l'image ; en tout auto, redétectées si on en retrouve autant (noms et rôles gardés).
   const onStraightened = useCallback((c, from, to) => {
-    if (!detectLanesInto(c, { quiet: true, keep: c.state.lanes, sameOnly: true, amend: true })) rotateLanesInto(c, from, to);
+    if (!c.autoMode || !detectLanesInto(c, { quiet: true, keep: c.state.lanes, sameOnly: true, amend: true })) rotateLanesInto(c, from, to);
     say('Pistes recalées sur l’image redressée.');
   }, [say]);
 
   const ctx = {
     ...a, info: source.info, tool, setTool, activeLaneId, setActiveLaneId, activeWarpId, setActiveWarpId,
-    calibSize, setCalibSize, ladders, notify, say, requestAssign, onStraightened, openLadders: () => setLaddersOpen(true),
+    calibSize, setCalibSize, ladders, notify, say, requestAssign, onStraightened, autoMode, openLadders: () => setLaddersOpen(true),
   };
   ctxRef.current = ctx;
 
-  // Première passe automatique sur une nouvelle image : pistes détectées, dernier marqueur appliqué.
-  // Elle fait partie de l'ouverture : rien à annuler.
+  // Tout auto : pistes détectées (à l'ouverture, ou tout de suite si on active le mode sans pistes) et
+  // dernier marqueur appliqué. À l'ouverture, cela en fait partie : rien à annuler.
   const auto = useRef({ lanes: false, ladder: false });
+  const setAutoMode = (on) => {
+    setAutoModeState(on);
+    rememberAuto(on);
+    auto.current = { lanes: false, ladder: false };
+  };
   useEffect(() => { auto.current.ladder = false; }, [state.mode]);
   useEffect(() => {
-    if (!fresh.current || state.lanes.length || auto.current.lanes) return;
+    if (!autoMode || auto.current.lanes) return;
     auto.current.lanes = true;
-    detectLanesInto(ctx, { amend: true });
-  }, [state.lanes.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!state.lanes.length) detectLanesInto(ctx, { amend: !canUndo });
+  }, [autoMode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!a.settled) return;
     const cal = state.calibration;
@@ -232,7 +240,7 @@ export default function GelWorkbench({ source, initial, initialModule, submitLab
       if (!cal.points.length) update((s) => ({ ...s, calibration: { ...s.calibration, points: suggestCalibration(results, s.calibration.ladder) } }), { amend: true });
       return;
     }
-    if (auto.current.ladder || cal.ladder || !ladders || !ready) return;
+    if (!autoMode || auto.current.ladder || cal.ladder || !ladders || !ready) return;
     auto.current.ladder = true;
     const kind = MODES[state.mode].ladderKind;
     const found = ladders.find((l) => l.id === lastLadder(kind) && l.kind === kind && !l.archived);
@@ -240,7 +248,7 @@ export default function GelWorkbench({ source, initial, initialModule, submitLab
     const snap = ladderSnapshot(found);
     update((s) => ({ ...s, calibration: { ...s.calibration, ladder: snap, points: suggestCalibration(results, snap) } }), { amend: !canUndo });
     say(`Marqueur « ${found.name} » appliqué (le dernier utilisé) : changez-le dans Tailles si besoin.`);
-  }, [results, a.settled, ladders, state.calibration.ladder, state.calibration.laneId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [results, a.settled, autoMode, ladders, state.calibration.ladder, state.calibration.laneId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Panneau d'analyse redimensionnable (poignée sur son bord gauche)
   const body = useRef(null);
@@ -282,6 +290,14 @@ export default function GelWorkbench({ source, initial, initialModule, submitLab
       </header>
       <div ref={body} className={`gel-wb-body${showDetails ? '' : ' no-details'}`} style={{ '--gel-details-w': `${panel.width}px` }}>
         <aside className="gel-wb-side" aria-label="Réglages">
+          <div className="gel-auto">
+            <Segmented label="Mode d’analyse" value={autoMode ? 'auto' : 'manual'} onChange={(v) => setAutoMode(v === 'auto')} options={[['manual', 'Manuel'], ['auto', 'Tout auto']]} />
+            <small className="hint">
+              {autoMode
+                ? 'Pistes détectées, dernier marqueur appliqué et pistes recalées d’office.'
+                : 'Chaque étape à la demande : « Détecter » les pistes, choisir le marqueur.'}
+            </small>
+          </div>
           <p className="gel-mode-hint">{MODES[state.mode].hint}</p>
           {MODULES.map((m) => (
             <ModuleCard key={m.key} title={m.title} icon={m.icon} summary={m.summary(ctx)} done={m.done(ctx)} open={openKey === m.key} onToggle={() => toggleModule(m.key)}>
