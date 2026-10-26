@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router-dom';
-import { Archive, Database, Eraser, HardDrive, LayoutDashboard, Server, Users, Wrench } from 'lucide-react';
+import { Archive, Database, Eraser, HardDrive, LayoutDashboard, Plug, Server, Users, Wrench } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
 import OverviewTab from '../components/admin/OverviewTab.jsx';
@@ -10,6 +10,7 @@ import DataTab from '../components/admin/DataTab.jsx';
 import DatabaseTab from '../components/admin/DatabaseTab.jsx';
 import FilesTab from '../components/admin/FilesTab.jsx';
 import ServerTab from '../components/admin/ServerTab.jsx';
+import IntegrationsTab from '../components/admin/IntegrationsTab.jsx';
 
 const TABS = [
   ['ensemble', 'Vue d’ensemble', LayoutDashboard, OverviewTab],
@@ -18,6 +19,7 @@ const TABS = [
   ['donnees', 'Données', Eraser, DataTab],
   ['base', 'Base de données', Database, DatabaseTab],
   ['fichiers', 'Fichiers', HardDrive, FilesTab],
+  ['integrations', 'Intégrations', Plug, IntegrationsTab],
   ['serveur', 'Serveur', Server, ServerTab],
 ];
 
@@ -46,7 +48,7 @@ export default function MaintenancePage() {
       <header className="page-head">
         <div>
           <h1><Wrench size={24} aria-hidden="true" className="adm-title-icon" /> Maintenance</h1>
-          <p className="page-lead">Comptes, sauvegardes, base de données, fichiers et serveur : de quoi tout gérer en cas de besoin. Chaque action est notée dans le journal.</p>
+          <p className="page-lead">Comptes, sauvegardes, base de données, fichiers, intégrations et serveur : de quoi tout gérer en cas de besoin. Chaque action est notée dans le journal.</p>
         </div>
       </header>
       {maintenance?.on && (

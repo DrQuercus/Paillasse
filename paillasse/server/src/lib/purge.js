@@ -139,6 +139,14 @@ async function deleteProjects(c, list) {
   const datasets = await c.query('DELETE FROM datasets WHERE project_id = ANY($1)', [list]);
   await c.query('UPDATE sequences SET project_id = NULL WHERE project_id = ANY($1)', [list]);
   await c.query('UPDATE samples SET project_id = NULL WHERE project_id = ANY($1)', [list]);
+  // Qui voyait chaque projet : relu par la base pour l'événement project.deleted (migration 016), car les
+  // membres sont retirés avant le projet
+  await c.query(
+    `SELECT set_config('paillasse.project_audience', coalesce(jsonb_object_agg(p.id, coalesce((
+       SELECT jsonb_agg(m.user_id) FROM project_members m WHERE m.project_id = p.id AND m.status = 'accepted'), '[]')), '{}')::text, true)
+     FROM projects p WHERE p.id = ANY($1)`,
+    [list],
+  );
   await c.query('DELETE FROM project_members WHERE project_id = ANY($1)', [list]);
   const projects = await c.query('DELETE FROM projects WHERE id = ANY($1)', [list]);
   return { projects: projects.rowCount, ...entries, notes: notes.rowCount, datasets: datasets.rowCount };
@@ -272,6 +280,7 @@ const NULLABLE_REFS = [
   ['entries', 'locked_by'], ['ladders', 'created_by'], ['ladders', 'updated_by'], ['reagents', 'created_by'], ['reagents', 'updated_by'],
   ['sample_events', 'created_by'], ['samples', 'created_by'], ['samples', 'updated_by'], ['samples', 'owner_id'],
   ['storage_units', 'created_by'], ['storage_units', 'updated_by'], ['templates', 'created_by'], ['templates', 'updated_by'],
+  ['api_tokens', 'revoked_by'],
 ];
 
 export async function userImpact(userId) {
@@ -322,6 +331,9 @@ async function handOverProjects(c, userId, actorId) {
 export async function deleteUser(userId, { data = 'keep', anonymize = false, actorId }) {
   return withPurge(async (c) => {
     const out = { removed: {}, full: false };
+    // Ses accès extérieurs (jetons d'API, webhooks) disparaissent dans tous les cas
+    out.removed.api_tokens = (await c.query('DELETE FROM api_tokens WHERE user_id = $1', [userId])).rowCount;
+    out.removed.webhooks = (await c.query('DELETE FROM webhooks WHERE user_id = $1', [userId])).rowCount;
     if (data === 'delete') {
       const { rows: e } = await c.query('SELECT id FROM entries WHERE created_by = $1', [userId]);
       Object.assign(out.removed, await deleteEntries(c, e.map((r) => r.id)));

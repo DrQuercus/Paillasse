@@ -307,6 +307,12 @@ les calculs de paillasse et l'analyse de gels ; le registre de constructions et 
   C'est une copie de lecture : un `.md` ne se réimporte pas, et seule la version figée dans Paillasse fait foi.
 - **Export** en un clic : zip avec `data.json`, chaque entrée en HTML autonome et tous les fichiers (vos projets et
   ceux où vous êtes membre ; l'administrateur exporte tout depuis Maintenance › Données).
+- **Intégrations** (page « Intégrations ») : le cahier s'ouvre à une **IA locale** (Open WebUI, LM Studio,
+  AnythingLLM, Claude Desktop…) par un **serveur MCP**, aux automatisations et aux scripts par une **API REST**
+  décrite en OpenAPI, à un index de recherche par un **export de documents** et un **flux de changements**, et aux
+  outils qui veulent être prévenus par des **webhooks** signés. Chaque outil a son **jeton d'accès** personnel
+  (lecture seule, ou lecture et écriture), avec les droits de son compte et jamais ceux d'un administrateur.
+  Voir « Intégrations » plus bas.
 
 Côté base de données, les tables `entry_versions` et `attachments` sont en ajout seul et une entrée
 verrouillée ne peut plus changer : des triggers PostgreSQL refusent toute modification, même en SQL direct.
@@ -403,6 +409,84 @@ Plus aucun administrateur ne peut se connecter (mot de passe oublié, compte dé
 `npm --prefix server run create-user -- secours "Compte de secours" --admin` crée ou réactive un compte
 administrateur (et remet son mot de passe).
 L'export zip (barre latérale) est un complément lisible sans l'application, pas un remplacement des sauvegardes.
+
+## Intégrations : IA locale, automatisations, autres outils
+
+Paillasse n'est pas une boîte fermée : tout ce qu'on y fait à la main, un outil peut le lire et, si on l'y autorise,
+l'écrire. Chaque fonction ouverte aux outils est décrite une seule fois (`server/src/integrations/ops/`) et servie à
+la fois par l'API REST, sa description OpenAPI, le serveur MCP et `llms.txt` : 44 opérations aujourd'hui (chercher
+dans tout le cahier ; lire une entrée en Markdown, ses versions, son intégrité, ses fichiers ; créer une entrée,
+la compléter en Markdown, joindre un fichier, figer une version, verrouiller, ajouter un addendum ; séquences en
+GenBank ou FASTA, sites de restriction, digestion et PCR virtuelles, analyse d'amorces ; stockage : où est ce tube,
+ranger, déplacer, sortir, remettre, jeter ; jeux de données statistiques ; modèles, produits, marqueurs ; activité
+récente).
+
+**Jetons d'accès.** Chacun crée les siens dans la page **Intégrations** (un par outil) : nom, droits (*lecture
+seule* ou *lecture et écriture*), validité (30 jours à sans limite). Le jeton (`pai_…`) n'est montré qu'une fois ;
+Paillasse n'en garde que l'empreinte SHA-256, et affiche sa dernière utilisation. Il s'envoie dans l'en-tête
+`Authorization: Bearer pai_…`. Un jeton agit avec les droits de son compte sur les projets (un projet privé reste
+introuvable pour les autres), **jamais avec les droits d'administration**, ne gère pas les jetons ni le mot de passe,
+et ne passe pas en mode maintenance. Un jeton en lecture seule ne modifie rien ; une entrée ne se verrouille que si
+l'appel le confirme explicitement (`confirm: true`). Limite : 300 requêtes d'affilée, puis 20 par seconde (réponse
+429 et `Retry-After` au-delà). L'administrateur voit tous les jetons et webhooks du labo, peut en révoquer, et peut
+couper d'un clic tout l'accès par jeton ou les seuls webhooks (**Maintenance › Intégrations**) ; tout est noté au
+journal d'administration.
+
+**Serveur MCP** (`https://<serveur>/mcp`) : le protocole des IA (Model Context Protocol), en HTTP « streamable »
+sans état, avec le jeton en Bearer. L'IA y trouve les outils, des ressources lisibles par adresse
+(`paillasse://entries/{id}`, `…/sequences/SEQ-0001`, `…/samples/ECH-0001`, projets, modèles, jeux de données) et des
+consignes prêtes à l'emploi (résumer une entrée, bilan d'un projet sur une période, préparer une manip, retrouver un
+échantillon, rédiger la conclusion d'une entrée). Pour un petit modèle local, `…/mcp?profile=essential` ne propose
+qu'une douzaine d'outils ; `?tools=search,get_entry` une liste choisie. La page Intégrations donne la configuration
+prête à copier pour Open WebUI, LM Studio, AnythingLLM et n8n. Pour les clients qui ne lancent que des programmes
+locaux (Claude Desktop, Jan, Cline…), le **pont** `server/scripts/paillasse-mcp.mjs` (aussi téléchargeable depuis la
+page, un seul fichier, Node.js 18 ou plus, sans dépendance) relaie l'entrée standard vers `/mcp` :
+
+```json
+{ "mcpServers": { "paillasse": { "command": "node", "args": ["/chemin/vers/paillasse-mcp.mjs"],
+  "env": { "PAILLASSE_URL": "https://paillasse.labo.fr", "PAILLASSE_TOKEN": "pai_…" } } } }
+```
+
+`PAILLASSE_URL=… PAILLASSE_TOKEN=… node paillasse-mcp.mjs --check` vérifie l'adresse et le jeton.
+
+**API REST** (`https://<serveur>/api/v1`) : une route par opération, paramètres en JSON (ou dans l'adresse pour une
+lecture), erreurs en français qui disent quoi corriger (un paramètre inconnu donne la liste des paramètres
+possibles). `GET /api/v1` liste les opérations ; `/api/v1/openapi.json` (public, sans données) les décrit en
+OpenAPI 3.1, à donner à Open WebUI (serveur d'outils OpenAPI), n8n, Postman ou un générateur de client ;
+`POST /api/v1/tools/{nom}` appelle n'importe quelle opération par son nom. `/llms.txt` résume tout cela pour une IA
+qui doit écrire un script ou un workflow. Les appels depuis une autre origine sont permis (CORS), avec un jeton
+seulement : le cookie de session n'y sert jamais.
+
+```bash
+curl -H "Authorization: Bearer pai_…" "https://paillasse.labo.fr/api/v1/search?query=DegU"
+curl -X POST "https://paillasse.labo.fr/api/v1/entries" -H "Authorization: Bearer pai_…" \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "…", "title": "Mesures du jour", "content_markdown": "## Résultats\n\n| A | 0,52 |\n|---|---|"}'
+```
+
+Le Markdown reçu est converti en contenu d'éditeur (titres, gras, italique, listes, cases à cocher, tableaux,
+citations, code, liens, images jointes) ; une entrée ouverte dans le navigateur se met à jour d'elle-même quand un
+outil la complète (et passe en lecture seule s'il la verrouille), tant qu'on n'est pas en train d'y écrire.
+
+**Synchronisation.** Pour qu'une IA locale cherche dans tout le cahier (RAG) : `GET /api/v1/documents` exporte tout
+ce que le compte voit, une ligne JSON par objet (entrée en Markdown, séquence, tube, jeu de données, modèle, projet,
+avec ses métadonnées et son adresse), `?since=` seulement ce qui a changé depuis une date. L'en-tête
+`X-Paillasse-Cursor` donne le curseur à reprendre ensuite dans `GET /api/v1/changes?cursor=…` : les objets modifiés
+(ou supprimés) depuis, regroupés par objet. Les événements sont gardés 90 jours ; leurs numéros suivent l'ordre de
+validation des transactions, si bien qu'un curseur n'en saute jamais.
+
+**Webhooks.** Paillasse prévient un outil (n8n, Node-RED, un script, le serveur de l'IA…) à chaque événement choisi
+(entrée créée, modifiée, figée, verrouillée, déplacée ; fichier joint ; séquence, tube, contenant, jeu de données,
+modèle, produit ou marqueur ajouté, modifié, archivé ou supprimé ; filtre par projet possible) : un POST JSON signé au
+format [Standard Webhooks](https://www.standardwebhooks.com) (en-têtes `webhook-id`, `webhook-timestamp`,
+`webhook-signature`, secret `whsec_…`), avec un en-tête de plus au besoin (clé d'API de l'outil). Les modifications
+d'une entrée en cours de saisie sont regroupées (un envoi après 30 s sans changement). Un échec est retenté cinq
+fois (30 s, 2 min, 10 min, 1 h, 6 h) ; un webhook qui répond 410, ou qui échoue 20 envois d'affilée, est mis en
+pause. Le journal des envois (page Intégrations) montre chaque tentative et permet de renvoyer. Un événement ne
+contient qu'un type, un titre, un code et des adresses : l'outil relit le détail avec son jeton, donc avec ses droits.
+
+Derrière nginx : rien de particulier pour `/mcp` (réponses JSON, pas de flux), mais `client_max_body_size 40m;` si
+des outils joignent des fichiers par l'API (20 Mo de fichier en base64 font 27 Mo de JSON).
 
 ## Développement
 
@@ -527,6 +611,8 @@ server/
                                réglages (mode maintenance), destinations et historique des sauvegardes
   migrations/013_admin_purge.sql  suppression administrateur (garde-fous levés par SET LOCAL seulement),
                                journal inviolable, comptes supprimés
+  migrations/016_integrations.sql  jetons d'accès, événements (et suppressions notées par la base), webhooks
+                               et journal de leurs envois
   src/index.js                 point d'entrée Express, sert aussi client/dist
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
@@ -543,10 +629,17 @@ server/
   src/lib/purge.js             suppression définitive : aperçu (ce qui part, ce qui reste), entrées, projets,
                                séquences, stockage, comptes
   src/routes/admin.js          page Maintenance : comptes, sauvegardes, base, fichiers, serveur (administrateurs)
+  src/lib/markdownIn.js        Markdown (CommonMark/GFM) → contenu de l'éditeur, pour ce qu'écrivent les outils
+  src/integrations/            ouverture aux autres outils : registry.js (registre des opérations) et ops/ (les
+                               opérations, par domaine), schema.js (validation des paramètres), rest.js (API v1),
+                               openapi.js, mcp.js (serveur MCP), docs.js (llms.txt), tokens.js (jetons, débit),
+                               events.js (événements, ordre de validation), webhooks.js (envois signés, relances),
+                               documents.js (export pour un index), routes.js (page Intégrations), admin.js
   src/lib/template-library.json  modèles de base (généré par npm --prefix client run templates)
   src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
                                jeux de données statistiques, stockage (inventory)
   scripts/create-user.js       créer un compte ou changer un mot de passe
+  scripts/paillasse-mcp.mjs    pont MCP stdio → /mcp, pour les clients MCP qui ne lancent que des programmes locaux
 client/
   src/pages/EntryPage.jsx      édition d'une entrée : autosave, versions, verrou
   src/components/NoteEditor.jsx  éditeur TipTap, glisser-déposer et collage de fichiers
@@ -569,6 +662,7 @@ client/
   src/pages/StoragePage.jsx    page Stockage
   src/components/Sharing.jsx   partage : choix des comptes, dialogue « Partager », invitations reçues
   src/pages/MaintenancePage.jsx  page Maintenance ; src/components/admin/ : un onglet par fichier
+  src/pages/IntegrationsPage.jsx  page Intégrations ; src/components/integrations/ : jetons, outils, webhooks, référence
 deploy/                        service systemd, sauvegarde et son timer
 ```
 
@@ -583,6 +677,9 @@ deploy/                        service systemd, sauvegarde et son timer
 - Toute route qui lit ou écrit quelque chose de rangé dans un projet passe par `server/src/lib/access.js`
   (`assertProject`, `assertEntry`… pour un élément, `visibleProjects` pour une liste) : un projet invisible répond 404,
   une écriture sans être membre 403.
+- Une nouvelle fonction utile à un outil extérieur s'ajoute au registre (`server/src/integrations/ops/`, logique
+  partagée avec la route de l'interface) : elle apparaît d'un coup dans l'API REST, l'OpenAPI, le serveur MCP et
+  `llms.txt`. Un geste qui change le cahier note un événement (`emit`, dans sa transaction s'il en a une).
 
 ## Limites connues de la v0.1
 
@@ -598,6 +695,10 @@ deploy/                        service systemd, sauvegarde et son timer
   versions de chaque entrée sert à ça).
 - Tableau partagé : si deux personnes modifient le même post-it au même moment, la dernière modification l'emporte.
 - Les fichiers ne sont pas prévisualisés hors images (les PDF s'ouvrent dans le navigateur).
+- Intégrations : pas d'OAuth (jetons personnels seulement ; les clients MCP qui exigent OAuth passent par le pont
+  stdio), pas de flux d'événements poussé par le serveur MCP (l'IA demande, Paillasse répond ; pour être prévenu :
+  webhooks), pas de création de contenants du stockage ni de jeux de données modifiés par l'API (ils se créent, ou
+  se rangent pour les tubes ; le reste se fait dans l'interface).
 - Éditeur de séquences : interface d'OVE en anglais ; pas encore de clonage in silico ni d'alignement
   de lectures Sanger (prévus ensuite). Digestion : sensibilité à la méthylation (dam/dcm) non signalée.
 - PCR virtuelle : pas de simulation des structures secondaires de la matrice ni des produits parasites

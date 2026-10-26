@@ -4,10 +4,11 @@ import { visibleProjects } from '../lib/access.js';
 
 const router = Router();
 
-router.get('/', async (req, res) => {
-  const raw = String(req.query.q ?? '').trim().slice(0, 200);
+/** Recherche plein texte dans les entrées des projets visibles (préfixes, extraits surlignés ⟦…⟧). */
+export async function searchEntries(user, rawQuery, limit = 50) {
+  const raw = String(rawQuery ?? '').trim().slice(0, 200);
   const terms = raw.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  if (!terms.length) return res.json([]);
+  if (!terms.length) return [];
   // Recherche par préfixe : « purif » trouve « purification »
   const tsquery = terms.slice(0, 12).map((t) => `${t}:*`).join(' & ');
   const like = `%${raw.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -22,10 +23,12 @@ router.get('/', async (req, res) => {
      WHERE NOT e.archived AND (e.search @@ q.tsq OR e.title ILIKE $2 OR e.plain_text ILIKE $2)
        AND e.project_id IN ${visibleProjects('$3')}
      ORDER BY rank DESC, e.entry_date DESC
-     LIMIT 50`,
-    [tsquery, like, req.user.id],
+     LIMIT $4`,
+    [tsquery, like, user.id, Math.min(50, Math.max(1, Number(limit) || 50))],
   );
-  res.json(rows);
-});
+  return rows;
+}
+
+router.get('/', async (req, res) => res.json(await searchEntries(req.user, req.query.q)));
 
 export default router;

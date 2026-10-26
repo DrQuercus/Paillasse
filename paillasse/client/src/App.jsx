@@ -24,6 +24,7 @@ const GelPage = lazy(() => import('./pages/GelPage.jsx'));
 const StatsPage = lazy(() => import('./pages/StatsPage.jsx'));
 const StoragePage = lazy(() => import('./pages/StoragePage.jsx'));
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage.jsx'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage.jsx'));
 
 function EntryRoute() {
   const { id } = useParams();
@@ -177,6 +178,7 @@ export default function App() {
             <Route path="/calc/:kind" element={<Suspense fallback={null}><CalcPage /></Suspense>} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/templates/:id" element={<TemplateRoute />} />
+            <Route path="/integrations" element={<Suspense fallback={null}><IntegrationsPage /></Suspense>} />
             <Route path="/maintenance" element={user.is_admin ? <Suspense fallback={null}><MaintenancePage /></Suspense> : <Navigate to="/" replace />} />
             <Route path="/maintenance/:tab" element={user.is_admin ? <Suspense fallback={null}><MaintenancePage /></Suspense> : <Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />

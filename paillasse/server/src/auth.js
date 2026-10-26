@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { query } from './db.js';
 import { getSetting } from './lib/settings.js';
+import { bearerToken, rateLimit, tokenUser } from './integrations/tokens.js';
 
 export const SESSION_COOKIE = 'paillasse_session';
 
@@ -80,15 +81,61 @@ export function parseCookies(req, _res, next) {
   next();
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Compte de la requête : jeton d'accès (Authorization: Bearer pai_…) ou cookie de session. Un autre type
+ * d'en-tête Authorization (authentification du serveur web, par exemple) est ignoré.
+ * Renvoie { user, token } ou { error: [statut, message] }.
+ */
+export async function authenticate(req) {
+  const value = bearerToken(req);
+  if (value === null) return { user: await sessionUser(req), token: null };
+  const found = await tokenUser(value, req.ip);
+  if (!found) return { error: [401, 'Jeton d’accès invalide, expiré ou révoqué.'] };
+  if (!getSetting('integrations').enabled) {
+    return { error: [403, 'L’accès par jeton (API, IA, automatisations) est désactivé par l’administrateur du cahier.'] };
+  }
+  return found;
+}
+
+/**
+ * Connexion requise (session ou jeton). Un jeton n'a jamais les droits d'administration ; un jeton en lecture
+ * seule ne peut rien modifier (les routes /api/v1 et /mcp vérifient la portée opération par opération et
+ * posent req.scopeByOperation).
+ */
 export async function requireAuth(req, res, next) {
-  const user = await sessionUser(req);
-  if (!user) return res.status(401).json({ error: 'Connexion requise' });
-  // Mode maintenance : seuls les administrateurs travaillent
+  const auth = await authenticate(req);
+  // API v1 et MCP : les outils attendent l'en-tête standard qui dit comment s'authentifier
+  if (req.scopeByOperation && (auth.error?.[0] === 401 || (!auth.error && !auth.user))) res.set('WWW-Authenticate', 'Bearer realm="Paillasse"');
+  if (auth.error) return res.status(auth.error[0]).json({ error: auth.error[1] });
+  const { user, token } = auth;
+  if (!user) {
+    return res.status(401).json({ error: req.scopeByOperation ? 'Jeton d’accès requis : en-tête Authorization: Bearer pai_… (jeton créé dans Paillasse, page Intégrations).' : 'Connexion requise' });
+  }
+  // Mode maintenance : seuls les administrateurs travaillent (et pas par jeton)
   const maintenance = getSetting('maintenance');
-  if (maintenance.on && !user.is_admin) {
+  if (maintenance.on && !(user.is_admin && !token)) {
     return res.status(503).json({ error: maintenance.message || 'Maintenance en cours.', maintenance: true });
   }
-  req.user = publicUser(user);
+  req.user = { ...publicUser(user), is_admin: Boolean(user.is_admin) && !token };
+  if (token) {
+    req.apiToken = token;
+    const wait = rateLimit(token.id);
+    if (wait) {
+      res.set('Retry-After', String(wait));
+      return res.status(429).json({ error: `Trop de requêtes avec ce jeton : réessayez dans ${wait} s.` });
+    }
+    if (token.scope === 'read' && !SAFE_METHODS.has(req.method) && !req.scopeByOperation) {
+      return res.status(403).json({ error: 'Ce jeton est en lecture seule.' });
+    }
+  }
+  next();
+}
+
+/** Réservé à une session ouverte dans le navigateur (gestion des jetons, mot de passe). */
+export function requireSession(req, res, next) {
+  if (req.apiToken) return res.status(403).json({ error: 'Pas avec un jeton d’accès : ouvrez Paillasse dans le navigateur.' });
   next();
 }
 
@@ -101,6 +148,7 @@ export function requirePasswordChosen(req, res, next) {
 }
 
 export function requireAdmin(req, res, next) {
+  if (req.apiToken) return res.status(403).json({ error: 'Les jetons d’accès n’ont pas les droits d’administration.' });
   if (!req.user?.is_admin) return res.status(403).json({ error: 'Réservé aux administrateurs.' });
   next();
 }

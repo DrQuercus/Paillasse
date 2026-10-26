@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { query } from '../db.js';
 import {
-  SESSION_COOKIE, createSessionToken, hashPassword, publicUser, requireAuth, verifyPassword,
+  SESSION_COOKIE, createSessionToken, hashPassword, publicUser, requireAuth, requireSession, verifyPassword,
 } from '../auth.js';
 import { getSetting, logAdmin } from '../lib/settings.js';
 
@@ -45,7 +45,7 @@ router.post('/logout', (_req, res) => {
 router.get('/me', requireAuth, (req, res) => res.json(req.user));
 
 /** Changer son mot de passe (obligatoire après un mot de passe provisoire). Les autres sessions sont fermées. */
-router.post('/password', requireAuth, async (req, res) => {
+router.post('/password', requireAuth, requireSession, async (req, res) => {
   const { current, next } = req.body ?? {};
   const { rows: [user] } = await query('SELECT * FROM users WHERE id = $1', [req.user.id]);
   if (!verifyPassword(String(current ?? ''), user.password_hash)) {

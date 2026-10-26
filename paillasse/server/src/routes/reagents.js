@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { HttpError, notFound } from '../lib/errors.js';
+import { emit } from '../integrations/events.js';
 
 // Produits chimiques et réactifs utilisés par les calculs (masse molaire, concentrations usuelles).
 // Un calcul inséré dans une entrée garde sa propre copie des valeurs : modifier un produit n'y change rien.
@@ -56,6 +57,7 @@ router.post('/', async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) RETURNING id`,
     [r.name, r.formula, r.mw, r.category, r.stock_conc, r.working_conc, r.notes, req.user.id],
   ).catch(duplicate);
+  await emit(null, { type: 'reagent.created', id: rows[0].id, actor: req.user, data: { title: r.name } });
   res.status(201).json(await load(rows[0].id));
 });
 
@@ -69,7 +71,9 @@ router.put('/:id', async (req, res) => {
     [req.params.id, req.user.id, ...keys.map((k) => r[k])],
   ).catch(duplicate);
   if (!rowCount) throw notFound('Produit');
-  res.json(await load(req.params.id));
+  const updated = await load(req.params.id);
+  await emit(null, { type: 'reagent.updated', id: updated.id, actor: req.user, data: { title: updated.name } });
+  res.json(updated);
 });
 
 // Rien ne s'efface : un produit retiré est archivé (et peut être rétabli)
@@ -80,7 +84,9 @@ router.post('/:id/archive', async (req, res) => {
     [req.params.id, archived, req.user.id],
   ).catch(duplicate);
   if (!rowCount) throw notFound('Produit');
-  res.json(await load(req.params.id));
+  const updated = await load(req.params.id);
+  await emit(null, { type: 'reagent.updated', id: updated.id, actor: req.user, data: { title: updated.name, archived: updated.archived } });
+  res.json(updated);
 });
 
 async function load(id) {

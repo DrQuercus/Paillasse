@@ -9,6 +9,7 @@ import {
 } from '../lib/inventory.js';
 import { canonicalize } from '../lib/hash.js';
 import { escapeHtml } from '../lib/render.js';
+import { emit } from '../integrations/events.js';
 
 const router = Router();
 
@@ -20,12 +21,12 @@ const FULL_RATIO = 0.9;
 
 const UNIT_COLUMNS = 'id, parent_id, kind, name, temperature, style, rows, cols, color, notes, sort, format, slot, capacity';
 
-async function loadUnits(db) {
+export async function loadUnits(db = { query }) {
   const { rows } = await db.query(`SELECT ${UNIT_COLUMNS} FROM storage_units WHERE NOT archived ORDER BY sort, lower(name)`);
   return { list: rows, byId: new Map(rows.map((u) => [u.id, u])) };
 }
 
-const SAMPLE_SELECT = `
+export const SAMPLE_SELECT = `
   SELECT s.*, o.display_name AS owner_name, q.code AS sequence_code, q.name AS sequence_name, q.project_id AS sequence_project_id,
          e.title AS entry_title, e.project_id AS entry_project_id, p.name AS project_name
   FROM samples s
@@ -36,7 +37,7 @@ const SAMPLE_SELECT = `
 
 // Le stockage est commun au labo ; seuls le titre d'une entrée, le nom d'une séquence et le nom d'un projet
 // privés sont masqués
-const withLocation = (byId, visible = null) => (s) => {
+export const withLocation = (byId, visible = null) => (s) => {
   const path = s.unit_id ? unitPath(byId, s.unit_id) : [];
   const privateEntry = visible && s.entry_id && !visible.has(s.entry_project_id);
   const privateSequence = visible && s.sequence_id && s.sequence_project_id && !visible.has(s.sequence_project_id);
@@ -75,7 +76,8 @@ const event = (db, sampleId, kind, detail, userId) => db.query(
 
 // --- Vue d'ensemble : tous les contenants, leurs comptes et la mini-carte des boîtes -------------------
 
-router.get('/', async (_req, res) => {
+/** Tous les contenants (non retirés) avec leurs comptes, et le nombre de tubes hors stockage. */
+export async function storageOverview() {
   const { list } = await loadUnits({ query });
   const { rows: samples } = await query('SELECT unit_id, row, col, cap_color, type, status FROM samples WHERE NOT archived AND unit_id IS NOT NULL');
   const byUnit = new Map();
@@ -94,22 +96,27 @@ router.get('/', async (_req, res) => {
     };
   });
   const { rows: [{ n }] } = await query('SELECT count(*)::int AS n FROM samples WHERE NOT archived AND unit_id IS NULL');
-  res.json({ units, loose: n });
-});
+  return { units, loose: n };
+}
+
+router.get('/', async (_req, res) => res.json(await storageOverview()));
 
 // --- Contenants ------------------------------------------------------------------------------------------
 
-router.get('/units/:id', async (req, res) => {
+/** Un contenant, son chemin et ses tubes (s'il en contient). */
+export async function getUnit(user, id) {
   const { byId } = await loadUnits({ query });
-  const unit = byId.get(req.params.id);
+  const unit = byId.get(id);
   if (!unit) throw notFound('Contenant');
   let samples = [];
   if (UNIT_KINDS[unit.kind].holdsSamples) {
     const { rows } = await query(`${SAMPLE_SELECT} WHERE s.unit_id = $1 AND NOT s.archived ORDER BY s.row NULLS LAST, s.col, s.created_at`, [unit.id]);
-    samples = rows.map(withLocation(byId, await visibleProjectIds(req.user.id)));
+    samples = rows.map(withLocation(byId, await visibleProjectIds(user.id)));
   }
-  res.json({ unit, path: unitPath(byId, unit.id), samples });
-});
+  return { unit, path: unitPath(byId, unit.id), samples };
+}
+
+router.get('/units/:id', async (req, res) => res.json(await getUnit(req.user, req.params.id)));
 
 router.post('/units', async (req, res) => {
   const b = req.body ?? {};
@@ -162,6 +169,7 @@ router.post('/units', async (req, res) => {
         ids.set(p.key, c.id);
       }
     }
+    await emit(db, { type: 'storage_unit.created', id: unit.id, actor: req.user, data: { title: unitLabel(unit), kind: unit.kind, parent_id: unit.parent_id } });
     return unit;
   });
   res.status(201).json(created);
@@ -224,7 +232,9 @@ router.put('/units/:id', async (req, res) => {
     );
     if (swap) {
       await db.query('UPDATE storage_units SET parent_id = $2, slot = $3, updated_by = $4, updated_at = now() WHERE id = $1', [swap.id, swap.parent_id, swap.slot, req.user.id]);
+      await emit(db, { type: 'storage_unit.updated', id: swap.id, actor: req.user, data: { title: unitLabel(byId.get(swap.id)), kind: byId.get(swap.id)?.kind, moved: true } });
     }
+    await emit(db, { type: 'storage_unit.updated', id: u.id, actor: req.user, data: { title: unitLabel(u), kind: u.kind, ...(moving ? { moved: true } : {}) } });
     return u;
   });
   res.json(updated);
@@ -263,6 +273,7 @@ router.post('/units/:id/drawers', async (req, res) => {
         }
       }
     }
+    if (out.boxes) await emit(db, { type: 'storage_unit.updated', id: root.id, actor: req.user, data: { title: unitLabel(root), kind: root.kind, drawers_added: out.drawers } });
     return out;
   });
   res.json(result);
@@ -278,8 +289,9 @@ router.post('/units/:id/archive', async (req, res) => {
   if (c.children || c.samples) {
     throw new HttpError(409, `Encore ${[c.children && `${c.children} contenant(s)`, c.samples && `${c.samples} tube(s)`].filter(Boolean).join(' et ')} à l’intérieur : videz-le d’abord.`);
   }
-  const { rowCount } = await query('UPDATE storage_units SET archived = true, updated_by = $2, updated_at = now() WHERE id = $1', [req.params.id, req.user.id]);
-  if (!rowCount) throw notFound('Contenant');
+  const { rows: [u] } = await query(`UPDATE storage_units SET archived = true, updated_by = $2, updated_at = now() WHERE id = $1 RETURNING ${UNIT_COLUMNS}`, [req.params.id, req.user.id]);
+  if (!u) throw notFound('Contenant');
+  await emit(null, { type: 'storage_unit.archived', id: u.id, actor: req.user, data: { title: unitLabel(u), kind: u.kind } });
   res.json({ ok: true });
 });
 
@@ -329,31 +341,38 @@ ${grid}
 
 // --- Échantillons --------------------------------------------------------------------------------------
 
-router.get('/samples', async (req, res) => {
-  const q = String(req.query.q ?? '').trim();
+/** Recherche de tubes : texte (nom, code, notes, concentration, séquence), type, séquence ou entrée liée. */
+export async function searchSamples(user, params = {}) {
+  const q = String(params.q ?? '').trim();
   const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const params = [];
+  const values = [];
   const where = ['NOT s.archived'];
   if (q) {
-    params.push(`%${escaped}%`);
-    const i = params.length;
+    values.push(`%${escaped}%`);
+    const i = values.length;
     where.push(`(s.name ILIKE $${i} OR s.code ILIKE $${i} OR s.notes ILIKE $${i} OR s.concentration ILIKE $${i} OR q.code ILIKE $${i} OR q.name ILIKE $${i})`);
   }
-  if (SAMPLE_TYPES[req.query.type]) { params.push(req.query.type); where.push(`s.type = $${params.length}`); }
-  if (req.query.sequence) { params.push(req.query.sequence); where.push(`s.sequence_id = $${params.length}`); }
-  if (req.query.entry) { params.push(req.query.entry); where.push(`s.entry_id = $${params.length}`); }
-  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+  if (SAMPLE_TYPES[params.type]) { values.push(params.type); where.push(`s.type = $${values.length}`); }
+  if (params.sequence) { values.push(params.sequence); where.push(`s.sequence_id = $${values.length}`); }
+  if (params.entry) { values.push(params.entry); where.push(`s.entry_id = $${values.length}`); }
+  if (params.unit) { values.push(params.unit); where.push(`s.unit_id = $${values.length}`); }
+  if (params.status && ['stored', 'out'].includes(params.status)) { values.push(params.status); where.push(`s.status = $${values.length}`); }
+  const limit = Math.min(200, Math.max(1, Number(params.limit) || 50));
+  const offset = Math.max(0, Math.trunc(Number(params.offset) || 0));
   const { rows } = await query(
     `${SAMPLE_SELECT} WHERE ${where.join(' AND ')}
-     ORDER BY (s.code ILIKE $${params.length + 1}) DESC, s.updated_at DESC LIMIT ${limit}`,
-    [...params, escaped],
+     ORDER BY (s.code ILIKE $${values.length + 1}) DESC, s.updated_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    [...values, escaped],
   );
   const { byId } = await loadUnits({ query });
-  res.json(rows.map(withLocation(byId, await visibleProjectIds(req.user.id))));
-});
+  return rows.map(withLocation(byId, await visibleProjectIds(user.id)));
+}
 
-router.get('/samples/:id', async (req, res) => {
-  const { rows: [s] } = await query(`${SAMPLE_SELECT} WHERE s.id = $1`, [req.params.id]);
+router.get('/samples', async (req, res) => res.json(await searchSamples(req.user, req.query)));
+
+/** Un tube : fiche, emplacement complet et historique. */
+export async function getSample(user, id) {
+  const { rows: [s] } = await query(`${SAMPLE_SELECT} WHERE s.id = $1`, [id]);
   if (!s) throw notFound('Échantillon');
   const { byId } = await loadUnits({ query });
   const { rows: events } = await query(
@@ -361,21 +380,23 @@ router.get('/samples/:id', async (req, res) => {
      LEFT JOIN users u ON u.id = ev.created_by WHERE ev.sample_id = $1 ORDER BY ev.created_at DESC, ev.id`,
     [s.id],
   );
-  res.json({ ...withLocation(byId, await visibleProjectIds(req.user.id))(s), events });
-});
+  return { ...withLocation(byId, await visibleProjectIds(user.id))(s), events };
+}
+
+router.get('/samples/:id', async (req, res) => res.json(await getSample(req.user, req.params.id)));
 
 /**
  * Ranger des tubes dans une boîte ou un sac.
  * - { unit_id, sample: {…}, count, start: { row, col } } : count aliquots identiques, aux premières places libres ;
  * - { unit_id, items: [{ …champs, row, col }] } : tubes décrits un par un (plan de boîte collé depuis Excel).
  */
-router.post('/samples', async (req, res) => {
-  const b = req.body ?? {};
+export async function storeSamples(user, body) {
+  const b = body ?? {};
   for (const raw of Array.isArray(b.items) ? b.items.slice(0, 500) : [b.sample]) {
     const { fields } = cleanSample(raw);
-    if (fields) await checkLinks(req.user, fields);
+    if (fields) await checkLinks(user, fields);
   }
-  const created = await tx(async (db) => {
+  return tx(async (db) => {
     const { byId } = await loadUnits(db);
     const unit = byId.get(b.unit_id);
     if (!unit || !UNIT_KINDS[unit.kind].holdsSamples) throw new HttpError(400, 'Choisissez une boîte ou un sac où ranger les tubes.');
@@ -419,15 +440,18 @@ router.post('/samples', async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10::date, current_date), $11, $12, coalesce($13::uuid, $17::uuid), $14, $15, $16, $18, $19, $17, $17)
          RETURNING id, code, name, row, col`,
         [f.name, f.type, unit.id, row, col, f.cap_color, f.concentration, f.volume, f.aliquot ?? '', f.frozen_on, f.expires_on,
-          f.thaw_count ?? 0, f.owner_id, f.project_id, f.sequence_id, f.entry_id, req.user.id, f.notes, JSON.stringify(f.details ?? {})],
+          f.thaw_count ?? 0, f.owner_id, f.project_id, f.sequence_id, f.entry_id, user.id, f.notes, JSON.stringify(f.details ?? {})],
       );
-      await event(db, s.id, 'created', `Rangé : ${locationText(unitPath(byId, unit.id), row, col)}`, req.user.id);
-      out.push(s);
+      const location = locationText(unitPath(byId, unit.id), row, col);
+      await event(db, s.id, 'created', `Rangé : ${location}`, user.id);
+      await emit(db, { type: 'sample.created', id: s.id, actor: user, data: { title: s.name, code: s.code, location } });
+      out.push({ ...s, location });
     }
     return out;
   });
-  res.status(201).json(created);
-});
+}
+
+router.post('/samples', async (req, res) => res.status(201).json(await storeSamples(req.user, req.body)));
 
 /** On ne rattache un tube qu'à ce que l'on peut voir. */
 async function checkLinks(user, f, cur = {}) {
@@ -447,43 +471,46 @@ const same = (a, b) => (a && typeof a === 'object') || (b && typeof b === 'objec
   ? canonicalize(a ?? {}) === canonicalize(b ?? {})
   : String(a ?? '') === String(b ?? '');
 
-router.put('/samples/:id', async (req, res) => {
-  const { fields, error } = cleanSample(req.body, { partial: true });
+export async function updateSample(user, id, body) {
+  const { fields, error } = cleanSample(body, { partial: true });
   if (error) throw new HttpError(400, error);
-  const updated = await tx(async (db) => {
-    const { rows: [cur] } = await db.query('SELECT * FROM samples WHERE id = $1 FOR UPDATE', [req.params.id]);
+  return tx(async (db) => {
+    const { rows: [cur] } = await db.query('SELECT * FROM samples WHERE id = $1 FOR UPDATE', [id]);
     if (!cur) throw notFound('Échantillon');
-    await checkLinks(req.user, fields, cur);
+    await checkLinks(user, fields, cur);
     const changed = Object.keys(fields).filter((k) => !same(fields[k], cur[k]));
     if (!changed.length) return cur;
     const sets = changed.map((k, i) => `${k} = $${i + 2}`).join(', ');
     const { rows: [s] } = await db.query(
       `UPDATE samples SET ${sets}, updated_by = $${changed.length + 2}, updated_at = now() WHERE id = $1 RETURNING *`,
-      [cur.id, ...changed.map((k) => (k === 'details' ? JSON.stringify(fields[k]) : fields[k])), req.user.id],
+      [cur.id, ...changed.map((k) => (k === 'details' ? JSON.stringify(fields[k]) : fields[k])), user.id],
     );
     // Résultat de criblage d'une grille : noté à part dans l'historique
     const screening = fields.details?.screening;
     if (changed.includes('details') && screening && screening !== cur.details?.screening) {
-      await event(db, cur.id, 'screened', `Criblage : ${GRID_SCREENING[screening]}`, req.user.id);
+      await event(db, cur.id, 'screened', `Criblage : ${GRID_SCREENING[screening]}`, user.id);
     }
     const others = changed.filter((k) => k !== 'details' || !screening || canonicalize({ ...fields.details, screening: null }) !== canonicalize({ ...cur.details, screening: null }));
-    if (others.length) await event(db, cur.id, 'edited', `Modifié : ${others.map((k) => FIELD_LABELS[k]).join(', ')}`, req.user.id);
+    if (others.length) await event(db, cur.id, 'edited', `Modifié : ${others.map((k) => FIELD_LABELS[k]).join(', ')}`, user.id);
+    await emit(db, { type: 'sample.updated', id: s.id, actor: user, data: { title: s.name, code: s.code, fields: changed } });
     return s;
   });
-  res.json(updated);
-});
+}
+
+router.put('/samples/:id', async (req, res) => res.json(await updateSample(req.user, req.params.id, req.body)));
 
 /**
  * Déplacements groupés (glisser-déposer, échange de deux tubes, transfert vers une autre boîte) :
  * { moves: [{ id, unit_id, row, col }] }. Les places libérées par le lot peuvent être reprises par le lot.
  */
-router.post('/samples/move', async (req, res) => {
-  const moves = Array.isArray(req.body?.moves) ? req.body.moves : [];
+export async function moveSamples(user, rawMoves) {
+  const moves = Array.isArray(rawMoves) ? rawMoves : [];
   if (!moves.length || moves.length > 500) throw new HttpError(400, 'Rien à déplacer.');
+  const done = [];
   await tx(async (db) => {
     const { byId } = await loadUnits(db);
     const ids = moves.map((m) => m.id);
-    const { rows: cur } = await db.query('SELECT id, unit_id, row, col, archived FROM samples WHERE id = ANY($1::uuid[]) FOR UPDATE', [ids]);
+    const { rows: cur } = await db.query('SELECT id, code, name, unit_id, row, col, archived FROM samples WHERE id = ANY($1::uuid[]) FOR UPDATE', [ids]);
     if (cur.length !== new Set(ids).size || cur.some((s) => s.archived)) throw new HttpError(400, 'Tube inconnu ou déjà jeté.');
     const before = new Map(cur.map((s) => [s.id, s]));
     // On libère d'abord toutes les places du lot, puis on les réattribue : l'index unique vérifie les conflits
@@ -499,16 +526,24 @@ router.post('/samples/move', async (req, res) => {
         if (!(row >= 0 && row < unit.rows && col >= 0 && col < unit.cols)) throw new HttpError(400, 'Position hors de la boîte.');
       }
       try {
-        await db.query('UPDATE samples SET unit_id = $2, row = $3, col = $4, updated_by = $5, updated_at = now() WHERE id = $1', [m.id, unit.id, row, col, req.user.id]);
+        await db.query('UPDATE samples SET unit_id = $2, row = $3, col = $4, updated_by = $5, updated_at = now() WHERE id = $1', [m.id, unit.id, row, col, user.id]);
       } catch (err) {
         if (err.code === '23505') throw new HttpError(409, `La position ${positionLabel(unit, row, col)} de « ${unitLabel(unit)} » est déjà prise.`);
         throw err;
       }
       const old = before.get(m.id);
       const from = old.unit_id ? locationText(unitPath(byId, old.unit_id), old.row, old.col) : 'hors stockage';
-      await event(db, m.id, 'moved', `De ${from} vers ${locationText(unitPath(byId, unit.id), row, col)}`, req.user.id);
+      const to = locationText(unitPath(byId, unit.id), row, col);
+      await event(db, m.id, 'moved', `De ${from} vers ${to}`, user.id);
+      await emit(db, { type: 'sample.moved', id: m.id, actor: user, data: { title: old.name, code: old.code, from, to } });
+      done.push({ id: m.id, code: old.code, name: old.name, from, to });
     }
   });
+  return done;
+}
+
+router.post('/samples/move', async (req, res) => {
+  await moveSamples(req.user, req.body?.moves);
   res.json({ ok: true });
 });
 
@@ -517,18 +552,24 @@ router.post('/samples/move', async (req, res) => {
  * out (sorti du froid, sa place l'attend), back (remis ; thawed: true compte une décongélation),
  * thaw (+1 décongélation), discard (épuisé ou jeté ; reason), restore (remis en service), color (bouchon).
  */
-router.post('/samples/action', async (req, res) => {
-  const b = req.body ?? {};
+// Gestes notés comme événements pour les outils extérieurs
+const ACTION_EVENTS = { out: 'sample.out', back: 'sample.back', thawed: 'sample.thawed', discarded: 'sample.discarded', restored: 'sample.restored', edited: 'sample.updated' };
+
+export async function sampleAction(user, body) {
+  const b = body ?? {};
   const ids = Array.isArray(b.ids) ? b.ids : [];
   if (!ids.length || ids.length > 500) throw new HttpError(400, 'Aucun tube choisi.');
   const reason = String(b.reason ?? '').trim().slice(0, 300);
+  const done = [];
   await tx(async (db) => {
-    const { rows: cur } = await db.query('SELECT id, status, archived, thaw_count, unit_id, row, col FROM samples WHERE id = ANY($1::uuid[]) FOR UPDATE', [ids]);
+    const { rows: cur } = await db.query('SELECT id, code, name, status, archived, thaw_count, unit_id, row, col FROM samples WHERE id = ANY($1::uuid[]) FOR UPDATE', [ids]);
     if (cur.length !== new Set(ids).size) throw notFound('Échantillon');
     for (const s of cur) {
       const set = async (sql, params, kind, detail) => {
-        await db.query(`UPDATE samples SET ${sql}, updated_by = $2, updated_at = now() WHERE id = $1`, [s.id, req.user.id, ...params]);
-        await event(db, s.id, kind, detail, req.user.id);
+        await db.query(`UPDATE samples SET ${sql}, updated_by = $2, updated_at = now() WHERE id = $1`, [s.id, user.id, ...params]);
+        await event(db, s.id, kind, detail, user.id);
+        await emit(db, { type: ACTION_EVENTS[kind] ?? 'sample.updated', id: s.id, actor: user, data: { title: s.name, code: s.code, detail } });
+        done.push({ id: s.id, code: s.code, name: s.name, action: kind, detail });
       };
       if (b.action === 'restore') {
         if (!s.archived) continue;
@@ -560,14 +601,20 @@ router.post('/samples/action', async (req, res) => {
       }
     }
   });
+  return done;
+}
+
+router.post('/samples/action', async (req, res) => {
+  await sampleAction(req.user, req.body);
   res.json({ ok: true });
 });
 
 // --- À surveiller et activité récente ---------------------------------------------------------------
 
-router.get('/watch', async (req, res) => {
+/** À surveiller : tubes sortis depuis trop longtemps, périmés, bientôt périmés, trop décongelés ; boîtes pleines. */
+export async function watchList(user) {
   const { byId } = await loadUnits({ query });
-  const visible = await visibleProjectIds(req.user.id);
+  const visible = await visibleProjectIds(user.id);
   const pick = async (where, order, params = []) => {
     const { rows } = await query(`${SAMPLE_SELECT} WHERE NOT s.archived AND ${where} ORDER BY ${order} LIMIT 30`, params);
     return rows.map(withLocation(byId, visible));
@@ -583,8 +630,10 @@ router.get('/watch', async (req, res) => {
     .map((c) => ({ unit: byId.get(c.unit_id), n: c.n }))
     .filter((c) => hasPositions(c.unit) && c.n >= FULL_RATIO * c.unit.rows * c.unit.cols)
     .map((c) => ({ id: c.unit.id, name: unitLabel(c.unit), used: c.n, capacity: c.unit.rows * c.unit.cols, location: locationText(unitPath(byId, c.unit.id)) }));
-  res.json({ out, expired, expiring, thawed, full, limits: { outHours: OUT_TOO_LONG_HOURS, thaw: THAW_LIMIT, expiringDays: EXPIRING_DAYS } });
-});
+  return { out, expired, expiring, thawed, full, limits: { outHours: OUT_TOO_LONG_HOURS, thaw: THAW_LIMIT, expiringDays: EXPIRING_DAYS } };
+}
+
+router.get('/watch', async (req, res) => res.json(await watchList(req.user)));
 
 router.get('/events', async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));

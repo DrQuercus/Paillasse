@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { assertDataset, assertProject, visibleProjects } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { KINDS, cleanDataset } from '../lib/stat.js';
+import { emit } from '../integrations/events.js';
 
 // Jeux de données de l'outil Statistiques. Modifiables librement (brouillons de travail) ;
 // ce qui est scellé, c'est la copie insérée dans une entrée.
@@ -18,7 +19,7 @@ const projectOf = (v) => {
   return String(v);
 };
 
-async function load(id, withData = true) {
+export async function loadDataset(id, withData = true) {
   const { rows } = await query(`SELECT ${COLUMNS}${withData ? ', d.data' : ''} ${FROM} WHERE d.id = $1`, [id]);
   if (!rows[0]) throw notFound('Jeu de données');
   return rows[0];
@@ -30,9 +31,8 @@ router.param('id', (req, _res, next, id) => {
   assertDataset(req.user, id, { write }).then((role) => { req.datasetRole = role; next(); }, next);
 });
 
-// Liste (sans les données), du plus récent au plus ancien ; recherche dans le titre
-router.get('/', async (req, res) => {
-  const q = String(req.query.q ?? '').trim();
+/** Liste (sans les données), du plus récent au plus ancien ; recherche dans le titre. */
+export async function listDatasets(user, { q = '', kind = null, archived = false } = {}) {
   const { rows } = await query(
     `SELECT ${COLUMNS},
        jsonb_array_length(d.data->'rows') AS row_count, jsonb_array_length(d.data->'columns') AS column_count
@@ -41,24 +41,34 @@ router.get('/', async (req, res) => {
        AND ($3::text IS NULL OR d.kind = $3)
        AND (d.project_id IS NULL OR d.project_id IN ${visibleProjects('$4')})
      ORDER BY d.updated_at DESC LIMIT 300`,
-    [req.query.archived === 'true', q, KINDS.includes(req.query.kind) ? req.query.kind : null, req.user.id],
+    [archived === true || archived === 'true', String(q ?? '').trim(), KINDS.includes(kind) ? kind : null, user.id],
   );
-  res.json(rows);
-});
+  return rows;
+}
+
+router.get('/', async (req, res) => res.json(await listDatasets(req.user, req.query)));
 
 router.get('/:id', async (req, res) => {
-  res.json({ ...await load(req.params.id), role: req.datasetRole });
+  res.json({ ...await loadDataset(req.params.id), role: req.datasetRole });
 });
 
-router.post('/', async (req, res) => {
-  const data = cleanDataset(req.body?.data);
-  await assertProject(req.user, projectOf(req.body?.project_id), { write: true });
+/** Nouveau jeu de données (data : forme de client/src/lib/stats/model.js). Renvoie son identifiant. */
+export async function createDataset(user, rawData, rawProjectId = null) {
+  const data = cleanDataset(rawData);
+  const projectId = projectOf(rawProjectId);
+  await assertProject(user, projectId, { write: true });
   const { rows } = await query(
     `INSERT INTO datasets (title, kind, data, project_id, created_by, updated_by)
      VALUES ($1, $2, $3, $4, $5, $5) RETURNING id`,
-    [data.title, data.kind, JSON.stringify(data), projectOf(req.body?.project_id), req.user.id],
+    [data.title, data.kind, JSON.stringify(data), projectId, user.id],
   );
-  res.status(201).json(await load(rows[0].id));
+  await emit(null, { type: 'dataset.created', id: rows[0].id, projectId, actor: user, data: { title: data.title, kind: data.kind } });
+  return rows[0].id;
+}
+
+router.post('/', async (req, res) => {
+  const id = await createDataset(req.user, req.body?.data, req.body?.project_id);
+  res.status(201).json(await loadDataset(id));
 });
 
 // Enregistrement : révision attendue, sinon conflit (modifié dans un autre onglet)
@@ -80,6 +90,8 @@ router.put('/:id', async (req, res) => {
     if (cur[0].archived) throw new HttpError(409, 'Ce jeu de données est archivé.');
     return res.status(409).json({ code: 'conflict', revision: cur[0].revision, error: 'Ce jeu de données a été modifié ailleurs (autre onglet ?). Rechargez-le avant de continuer.' });
   }
+  const { rows: [d] } = await query('SELECT project_id FROM datasets WHERE id = $1', [req.params.id]);
+  await emit(null, { type: 'dataset.updated', id: req.params.id, projectId: d.project_id, actor: req.user, data: { title: data.title, kind: data.kind, revision: rows[0].revision } });
   return res.json(rows[0]);
 });
 
@@ -89,7 +101,9 @@ router.post('/:id/archive', async (req, res) => {
     [req.params.id, req.body?.archived !== false, req.user.id],
   );
   if (!rowCount) throw notFound('Jeu de données');
-  res.json(await load(req.params.id, false));
+  const d = await loadDataset(req.params.id, false);
+  await emit(null, { type: d.archived ? 'dataset.archived' : 'dataset.updated', id: d.id, projectId: d.project_id, actor: req.user, data: { title: d.title, kind: d.kind } });
+  res.json(d);
 });
 
 export default router;

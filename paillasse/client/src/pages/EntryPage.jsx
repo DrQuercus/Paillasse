@@ -144,6 +144,47 @@ export default function EntryPage({ id }) {
     };
   }, []);
 
+  // Modifiée ailleurs (IA ou automatisation connectée, autre onglet) : la page se met à jour d'elle-même tant que
+  // rien n'est en cours de saisie ici ; sinon c'est l'enregistrement qui signale le conflit, comme avant
+  useEffect(() => {
+    let stopped = false;
+    const idle = () => { const s = st.current; return !stopped && !s.dirty && !s.saving && !s.blocked; };
+    const check = async () => {
+      if (!idle() || document.hidden) return;
+      try {
+        const r = await api.get(`/entries/${id}/revision`);
+        // (verrouillée ailleurs : la révision ne bouge pas, le statut si)
+        if (!idle() || (r.revision <= st.current.revision && r.status === 'draft')) return;
+        const e = await api.get(`/entries/${id}`);
+        if (!idle()) return;
+        Object.assign(st.current, {
+          revision: e.revision, title: e.title, date: e.entry_date, content: e.content,
+          projectId: e.project_id, blocked: e.status === 'locked' || e.role === 'admin',
+        });
+        setEntry(e);
+        setTitle(e.title);
+        setEntryDate(e.entry_date);
+        setProjectId(e.project_id);
+        setSaveState(e.status === 'locked' ? 'locked' : 'saved');
+        setDocKey((k) => k + 1);
+        loadVersions();
+        api.get(`/entries/${id}/attachments`).then(setAttachments).catch(() => {});
+        notify('Entrée mise à jour : elle vient d’être modifiée ailleurs (outil connecté ou autre onglet).');
+      } catch {
+        /* réseau : nouvel essai au prochain passage */
+      }
+    };
+    const timer = setInterval(check, 15000);
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [id, loadVersions, notify]);
+
   // --- Actions -----------------------------------------------------------------
   const refreshEntry = () => api.get(`/entries/${id}`).then(setEntry).catch(() => {});
 

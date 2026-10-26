@@ -4,6 +4,7 @@ import { assertProject, visibleProjects } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { escapeMd, safeFileName } from '../lib/markdown.js';
 import { entryFileBase, markdownWithFiles, originOf, sendZip, uniqueName } from '../lib/markdownExport.js';
+import { emit } from '../integrations/events.js';
 
 const router = Router();
 const COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -14,7 +15,7 @@ const PUBLIC = `p.id, p.name, p.description, p.color, p.archived, p.created_at, 
   (SELECT count(*)::int FROM project_members m WHERE m.project_id = p.id AND m.status = 'accepted') AS member_count,
   (SELECT count(*)::int FROM project_members m WHERE m.project_id = p.id AND m.status = 'pending') AS pending_count`;
 
-async function loadProject(id, user, opts) {
+export async function loadProject(id, user, opts) {
   const role = await assertProject(user, id, opts);
   const { rows } = await query(`SELECT ${PUBLIC} FROM projects p JOIN users ou ON ou.id = p.created_by WHERE p.id = $1`, [id]);
   if (!rows[0]) throw notFound('Projet');
@@ -53,7 +54,8 @@ async function invite(db, projectId, ownerId, userIds, invitedBy) {
 
 // Projets visibles : les miens et ceux où j'ai accepté l'invitation (un administrateur aussi : il voit le
 // reste depuis la page Maintenance)
-router.get('/', async (req, res) => {
+/** Projets visibles d'un compte, avec leur nombre d'entrées et la date de la dernière. */
+export async function listProjects(user, { archived = false } = {}) {
   const { rows } = await query(
     `SELECT p.id, p.name, p.description, p.color, p.archived, p.created_at,
             (p.board_share_token IS NOT NULL) AS board_shared, p.created_by AS owner_id, ou.display_name AS owner_name,
@@ -65,28 +67,36 @@ router.get('/', async (req, res) => {
      LEFT JOIN entries e ON e.project_id = p.id AND NOT e.archived
      WHERE ($1 OR NOT p.archived) AND p.id IN ${visibleProjects('$2')}
      GROUP BY p.id, ou.display_name ORDER BY p.archived, lower(p.name)`,
-    [req.query.archived === 'true', req.user.id],
+    [archived === true || archived === 'true', user.id],
   );
-  res.json(rows);
-});
+  return rows;
+}
+
+router.get('/', async (req, res) => res.json(await listProjects(req.user, { archived: req.query.archived })));
 
 router.get('/:id', async (req, res) => {
   res.json(await loadProject(req.params.id, req.user));
 });
 
 /** Création : privé par défaut ; share_with = comptes invités (ils doivent accepter). */
-router.post('/', async (req, res) => {
-  const name = String(req.body?.name ?? '').trim();
+/** Nouveau projet (privé ; share_with : comptes invités, qui doivent accepter). Renvoie son identifiant. */
+export async function createProject(user, body = {}) {
+  const name = String(body.name ?? '').trim().slice(0, 200);
   if (!name) throw new HttpError(400, 'Le projet doit avoir un nom.');
-  const color = COLOR.test(req.body?.color) ? req.body.color : '#2449C7';
-  const id = await tx(async (db) => {
+  const color = COLOR.test(body.color) ? body.color : '#2449C7';
+  return tx(async (db) => {
     const { rows: [p] } = await db.query(
       'INSERT INTO projects (name, description, color, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
-      [name, String(req.body?.description ?? ''), color, req.user.id],
+      [name, String(body.description ?? ''), color, user.id],
     );
-    await invite(db, p.id, req.user.id, req.body?.share_with, req.user.id);
+    await invite(db, p.id, user.id, body.share_with, user.id);
+    await emit(db, { type: 'project.created', id: p.id, projectId: p.id, actor: user, data: { title: name } });
     return p.id;
   });
+}
+
+router.post('/', async (req, res) => {
+  const id = await createProject(req.user, req.body ?? {});
   res.status(201).json(await loadProject(id, req.user));
 });
 
@@ -107,7 +117,9 @@ router.patch('/:id', async (req, res) => {
     [req.params.id, name, b.description ?? null, b.color ?? null, typeof b.archived === 'boolean' ? b.archived : null],
   );
   if (!rowCount) throw notFound('Projet');
-  res.json(await loadProject(req.params.id, req.user));
+  const p = await loadProject(req.params.id, req.user);
+  await emit(null, { type: 'project.updated', id: p.id, projectId: p.id, actor: req.user, data: { title: p.name, archived: p.archived } });
+  res.json(p);
 });
 
 // --- Markdown : tout le projet dans un dossier (une note par entrée, fichiers joints, note d'index) ----------------

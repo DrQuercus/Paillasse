@@ -10,6 +10,7 @@ import { entryFileBase, markdownOnServer, markdownWithFiles, originOf, sendZip, 
 import { cleanCalcNode } from '../lib/calc.js';
 import { cleanGelNode, gelAttachmentIds } from '../lib/gel.js';
 import { cleanStatNode, statAttachmentIds } from '../lib/stat.js';
+import { emit, projectAudience } from '../integrations/events.js';
 
 const router = Router();
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,7 +23,7 @@ const ENTRY_COLUMNS = `e.id, e.project_id, e.parent_entry_id, e.title, e.entry_d
   cu.display_name AS created_by_name, lu.display_name AS locked_by_name`;
 
 /** viewer : le compte qui regarde ; les addenda et l'entrée parente d'un autre projet invisible sont tus. */
-async function loadEntry(id, viewer = null, db = { query }) {
+export async function loadEntry(id, viewer = null, db = { query }) {
   const { rows } = await db.query(
     `SELECT ${ENTRY_COLUMNS}
      FROM entries e
@@ -69,24 +70,45 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
-router.post('/', async (req, res) => {
-  const b = req.body ?? {};
-  if (!b.project_id) throw new HttpError(400, 'Choisissez un projet.');
-  const role = await assertProject(req.user, b.project_id, { write: true });
-  const title = String(b.title ?? '').trim() || 'Sans titre';
-  const entryDate = DATE.test(b.entry_date) ? b.entry_date : today();
+/** Nœuds d'un document, sans le paragraphe vide qui le termine souvent. */
+const blocksOf = (doc) => {
+  const blocks = [...(isDoc(doc) ? doc.content ?? [] : [])];
+  const last = blocks.at(-1);
+  if (last?.type === 'paragraph' && !last.content?.length) blocks.pop();
+  return blocks;
+};
+
+/**
+ * Nouvelle entrée dans un projet : vide, depuis un modèle, et/ou avec des blocs ajoutés à la fin (blocks : nœuds
+ * TipTap, par exemple tirés d'un texte Markdown). Renvoie { id, role }.
+ */
+export async function createEntry(user, { project_id: projectId, title, entry_date: entryDate, template_id: templateId, blocks = [] }) {
+  if (!projectId) throw new HttpError(400, 'Choisissez un projet.');
+  const role = await assertProject(user, projectId, { write: true });
   let content = EMPTY_DOC;
-  if (b.template_id) {
-    const { rows } = await query('SELECT content FROM templates WHERE id = $1', [b.template_id]);
+  if (templateId) {
+    const { rows } = await query('SELECT content FROM templates WHERE id = $1', [templateId]);
     if (!rows[0]) throw notFound('Modèle');
     content = rows[0].content;
   }
-  const { rows } = await query(
-    `INSERT INTO entries (project_id, title, entry_date, content, plain_text, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [b.project_id, title, entryDate, JSON.stringify(content), docToPlainText(content), req.user.id],
-  );
-  res.status(201).json({ ...(await loadEntry(rows[0].id, req.user)), role });
+  if (blocks.length) content = { type: 'doc', content: [...blocksOf(content), ...blocks, { type: 'paragraph' }] };
+  const cleanTitle = String(title ?? '').trim().slice(0, 500) || 'Sans titre';
+  const date = DATE.test(entryDate) ? entryDate : today();
+  const id = await tx(async (db) => {
+    const { rows } = await db.query(
+      `INSERT INTO entries (project_id, title, entry_date, content, plain_text, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [projectId, cleanTitle, date, JSON.stringify(content), docToPlainText(content), user.id],
+    );
+    await emit(db, { type: 'entry.created', id: rows[0].id, projectId, actor: user, data: { title: cleanTitle, entry_date: date } });
+    return rows[0].id;
+  });
+  return { id, role };
+}
+
+router.post('/', async (req, res) => {
+  const { id, role } = await createEntry(req.user, req.body ?? {});
+  res.status(201).json({ ...(await loadEntry(id, req.user)), role });
 });
 
 router.get('/:id', async (req, res) => {
@@ -103,6 +125,10 @@ router.put('/:id', async (req, res) => {
   const title = b.title === undefined ? null : String(b.title).trim() || 'Sans titre';
   await assertEntry(req.user, req.params.id, { write: true });
   if (b.project_id) await assertProject(req.user, b.project_id, { write: true });
+  // Entrée changée de projet : ceux qui voyaient l'ancien projet l'apprennent (événement entry.moved)
+  const { rows: [before] } = await query('SELECT project_id, title FROM entries WHERE id = $1', [req.params.id]);
+  const moved = b.project_id && before && b.project_id !== before.project_id;
+  const oldAudience = moved ? await projectAudience(null, before.project_id) : null;
 
   const { rows } = await query(
     `UPDATE entries SET
@@ -122,7 +148,14 @@ router.put('/:id', async (req, res) => {
       b.project_id ?? null, b.revision,
     ],
   );
-  if (rows[0]) return res.json(rows[0]);
+  if (rows[0]) {
+    const newTitle = title ?? before?.title ?? '';
+    if (moved) {
+      await emit(null, { type: 'entry.moved', id: req.params.id, projectId: before.project_id, audience: oldAudience, actor: req.user, data: { title: newTitle } });
+    }
+    await emit(null, { type: 'entry.updated', id: req.params.id, projectId: b.project_id || before?.project_id, actor: req.user, data: { title: newTitle, revision: rows[0].revision } });
+    return res.json(rows[0]);
+  }
 
   const { rows: current } = await query('SELECT status, revision FROM entries WHERE id = $1', [req.params.id]);
   if (!current[0]) throw notFound('Entrée');
@@ -136,36 +169,52 @@ router.put('/:id', async (req, res) => {
   });
 });
 
+/**
+ * Ajoute des blocs à la fin d'un brouillon (le paragraphe vide final est remplacé, pas laissé au-dessus).
+ * check(db, nodes) : vérification supplémentaire dans la transaction. Renvoie { revision, updated_at }.
+ */
+export async function appendBlocks(user, entryId, nodes, { check = null, lockedMessage = 'Entrée verrouillée : ajoutez-le dans un addendum.' } = {}) {
+  await assertEntry(user, entryId, { write: true });
+  return tx(async (db) => {
+    const { rows: [entry] } = await db.query('SELECT status, content, title, project_id FROM entries WHERE id = $1 FOR UPDATE', [entryId]);
+    if (!entry) throw notFound('Entrée');
+    if (entry.status === 'locked') throw new HttpError(409, lockedMessage);
+    if (check) await check(db, nodes);
+    const content = { type: 'doc', content: [...blocksOf(entry.content), ...nodes, { type: 'paragraph' }] };
+    const { rows } = await db.query(
+      `UPDATE entries SET content = $2, plain_text = $3, revision = revision + 1, updated_at = now()
+       WHERE id = $1 RETURNING revision, updated_at`,
+      [entryId, JSON.stringify(content), docToPlainText(content)],
+    );
+    await emit(db, { type: 'entry.updated', id: entryId, projectId: entry.project_id, actor: user, data: { title: entry.title, revision: rows[0].revision } });
+    return rows[0];
+  });
+}
+
 // Ajoute un encart à la fin d'un brouillon : calcul (page Calculs), figure de gel (page Gels)
 // ou graphique et statistiques (page Statistiques).
 // Un onglet ouvert sur l'entrée verra le conflit de révision et proposera de recharger.
 router.post('/:id/blocks', async (req, res) => {
   const type = req.body?.node?.type;
   const node = type === 'gelFigure' ? cleanGelNode(req.body.node) : type === 'statFigure' ? cleanStatNode(req.body.node) : cleanCalcNode(req.body?.node);
-  await assertEntry(req.user, req.params.id, { write: true });
-  const result = await tx(async (db) => {
-    const { rows: [entry] } = await db.query('SELECT status, content FROM entries WHERE id = $1 FOR UPDATE', [req.params.id]);
-    if (!entry) throw notFound('Entrée');
-    if (entry.status === 'locked') throw new HttpError(409, 'Entrée verrouillée : ajoutez-le dans un addendum.');
-    if (node.type === 'gelFigure' || node.type === 'statFigure') {
+  const result = await appendBlocks(req.user, req.params.id, [node], {
+    async check(db) {
+      if (node.type !== 'gelFigure' && node.type !== 'statFigure') return;
       // Les images (et l'original d'un gel) doivent être des pièces jointes de cette entrée (scellées avec elle)
       const ids = node.type === 'gelFigure' ? gelAttachmentIds(node.attrs) : statAttachmentIds(node.attrs);
       const { rows } = await db.query('SELECT id FROM attachments WHERE entry_id = $1 AND id = ANY($2::uuid[])', [req.params.id, ids]);
       if (rows.length !== ids.length) throw new HttpError(400, 'Les images de la figure doivent être jointes à cette entrée.');
-    }
-    const blocks = [...(isDoc(entry.content) ? entry.content.content ?? [] : [])];
-    // Le paragraphe vide qui termine souvent une entrée est remplacé, pas laissé au-dessus du calcul
-    const last = blocks.at(-1);
-    if (last?.type === 'paragraph' && !last.content?.length) blocks.pop();
-    const content = { type: 'doc', content: [...blocks, node, { type: 'paragraph' }] };
-    const { rows } = await db.query(
-      `UPDATE entries SET content = $2, plain_text = $3, revision = revision + 1, updated_at = now()
-       WHERE id = $1 RETURNING revision, updated_at`,
-      [req.params.id, JSON.stringify(content), docToPlainText(content)],
-    );
-    return rows[0];
+    },
   });
   res.status(201).json(result);
+});
+
+// Révision courante, pour qu'une page ouverte voie qu'on a modifié l'entrée ailleurs (outil connecté, autre onglet)
+router.get('/:id/revision', async (req, res) => {
+  await assertEntry(req.user, req.params.id);
+  const { rows: [e] } = await query('SELECT revision, status, version_count, updated_at FROM entries WHERE id = $1', [req.params.id]);
+  if (!e) throw notFound('Entrée');
+  res.json(e);
 });
 
 router.get('/:id/versions', async (req, res) => {
@@ -192,28 +241,44 @@ router.get('/:id/versions/:number', async (req, res) => {
   res.json(rows[0]);
 });
 
-router.post('/:id/versions', async (req, res) => {
-  await assertEntry(req.user, req.params.id, { write: true });
-  const result = await tx((db) => createVersion(db, req.params.id, req.user.id, { note: req.body?.note ?? '' }));
-  res.status(result.unchanged ? 200 : 201).json(result);
-});
-
-router.post('/:id/lock', async (req, res) => {
-  const role = await assertEntry(req.user, req.params.id, { write: true });
-  await tx(async (db) => {
-    await createVersion(db, req.params.id, req.user.id, { kind: 'lock', note: req.body?.note ?? '' });
-    await db.query(
-      `UPDATE entries SET status = 'locked', locked_at = now(), locked_by = $2, updated_at = now()
-       WHERE id = $1`,
-      [req.params.id, req.user.id],
-    );
+/** Fige une version de la copie de travail (sans rien faire si rien n'a changé et sans note). */
+export async function freezeEntryVersion(user, entryId, note = '') {
+  await assertEntry(user, entryId, { write: true });
+  return tx(async (db) => {
+    const result = await createVersion(db, entryId, user.id, { note });
+    if (!result.unchanged) {
+      const { rows: [e] } = await db.query('SELECT project_id, title FROM entries WHERE id = $1', [entryId]);
+      await emit(db, {
+        type: 'entry.version_created', id: entryId, projectId: e.project_id, actor: user,
+        data: { title: e.title, version_number: result.version.version_number, hash: result.version.hash, note: result.version.note },
+      });
+    }
+    return result;
   });
-  res.json({ ...(await loadEntry(req.params.id, req.user)), role });
-});
+}
 
-router.post('/:id/addendum', async (req, res) => {
-  const role = await assertEntry(req.user, req.params.id, { write: true });
-  const parent = await loadEntry(req.params.id, req.user);
+/** Verrouille (signe) une entrée : version de verrouillage, puis plus aucune modification possible. */
+export async function lockEntry(user, entryId, note = '') {
+  const role = await assertEntry(user, entryId, { write: true });
+  await tx(async (db) => {
+    const { version } = await createVersion(db, entryId, user.id, { kind: 'lock', note });
+    const { rows: [e] } = await db.query(
+      `UPDATE entries SET status = 'locked', locked_at = now(), locked_by = $2, updated_at = now()
+       WHERE id = $1 RETURNING project_id, title`,
+      [entryId, user.id],
+    );
+    await emit(db, {
+      type: 'entry.locked', id: entryId, projectId: e.project_id, actor: user,
+      data: { title: e.title, version_number: version.version_number, hash: version.hash },
+    });
+  });
+  return role;
+}
+
+/** Addendum d'une entrée (verrouillée en général) : nouvelle entrée liée, avec éventuellement des blocs. */
+export async function createAddendum(user, parentId, blocks = []) {
+  const role = await assertEntry(user, parentId, { write: true });
+  const parent = await loadEntry(parentId, user);
   const content = {
     type: 'doc',
     content: [
@@ -221,26 +286,47 @@ router.post('/:id/addendum', async (req, res) => {
         type: 'paragraph',
         content: [{ type: 'text', marks: [{ type: 'italic' }], text: `Complément à l'entrée « ${parent.title} » du ${frDate(parent.entry_date)}.` }],
       },
+      ...blocks,
       { type: 'paragraph' },
     ],
   };
-  const { rows } = await query(
-    `INSERT INTO entries (project_id, parent_entry_id, title, entry_date, content, plain_text, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [parent.project_id, parent.id, `Addendum : ${parent.title}`, today(),
-      JSON.stringify(content), docToPlainText(content), req.user.id],
-  );
-  res.status(201).json({ ...(await loadEntry(rows[0].id, req.user)), role });
+  const title = `Addendum : ${parent.title}`;
+  const id = await tx(async (db) => {
+    const { rows } = await db.query(
+      `INSERT INTO entries (project_id, parent_entry_id, title, entry_date, content, plain_text, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [parent.project_id, parent.id, title, today(), JSON.stringify(content), docToPlainText(content), user.id],
+    );
+    await emit(db, { type: 'entry.created', id: rows[0].id, projectId: parent.project_id, actor: user, data: { title, parent_entry_id: parent.id } });
+    return rows[0].id;
+  });
+  return { id, role };
+}
+
+router.post('/:id/versions', async (req, res) => {
+  const result = await freezeEntryVersion(req.user, req.params.id, req.body?.note ?? '');
+  res.status(result.unchanged ? 200 : 201).json(result);
+});
+
+router.post('/:id/lock', async (req, res) => {
+  const role = await lockEntry(req.user, req.params.id, req.body?.note ?? '');
+  res.json({ ...(await loadEntry(req.params.id, req.user)), role });
+});
+
+router.post('/:id/addendum', async (req, res) => {
+  const { id, role } = await createAddendum(req.user, req.params.id);
+  res.status(201).json({ ...(await loadEntry(id, req.user)), role });
 });
 
 // Archive un brouillon créé par erreur (il reste dans la base et dans les exports)
 router.post('/:id/archive', async (req, res) => {
   await assertEntry(req.user, req.params.id, { write: true });
-  const { rowCount } = await query(
-    `UPDATE entries SET archived = true, updated_at = now() WHERE id = $1 AND status = 'draft'`,
+  const { rows } = await query(
+    `UPDATE entries SET archived = true, updated_at = now() WHERE id = $1 AND status = 'draft' RETURNING project_id, title`,
     [req.params.id],
   );
-  if (!rowCount) throw new HttpError(409, 'Seuls les brouillons peuvent être archivés.');
+  if (!rows[0]) throw new HttpError(409, 'Seuls les brouillons peuvent être archivés.');
+  await emit(null, { type: 'entry.archived', id: req.params.id, projectId: rows[0].project_id, actor: req.user, data: { title: rows[0].title } });
   res.json({ ok: true });
 });
 
@@ -250,7 +336,7 @@ router.get('/:id/verify', async (req, res) => {
 });
 
 /** Version demandée (?version=N ou last) ; sans version : la copie de travail. */
-async function findVersion(entry, wanted) {
+export async function findVersion(entry, wanted) {
   const n = wanted === 'last' ? entry.version_count : Number(wanted);
   if (!(n > 0)) return null;
   const { rows } = await query(

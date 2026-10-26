@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { HttpError, notFound } from '../lib/errors.js';
+import { emit } from '../integrations/events.js';
 
 // Marqueurs de taille des gels. Une figure insérée dans le cahier garde sa propre copie
 // du marqueur utilisé : modifier ou archiver un marqueur ne change aucune entrée.
@@ -75,6 +76,7 @@ router.post('/', async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) RETURNING id`,
     [l.name, l.kind, l.bands, l.load, l.supplier, l.reference, l.notes, req.user.id],
   ).catch(duplicate);
+  await emit(null, { type: 'ladder.created', id: rows[0].id, actor: req.user, data: { title: l.name, kind: l.kind } });
   res.status(201).json(await load(rows[0].id));
 });
 
@@ -88,7 +90,9 @@ router.put('/:id', async (req, res) => {
     [req.params.id, req.user.id, ...keys.map((k) => l[k])],
   ).catch(duplicate);
   if (!rowCount) throw notFound('Marqueur');
-  res.json(await load(req.params.id));
+  const updated = await load(req.params.id);
+  await emit(null, { type: 'ladder.updated', id: updated.id, actor: req.user, data: { title: updated.name, kind: updated.kind } });
+  res.json(updated);
 });
 
 router.post('/:id/archive', async (req, res) => {
@@ -97,7 +101,9 @@ router.post('/:id/archive', async (req, res) => {
     [req.params.id, req.body?.archived !== false, req.user.id],
   ).catch(duplicate);
   if (!rowCount) throw notFound('Marqueur');
-  res.json(await load(req.params.id));
+  const updated = await load(req.params.id);
+  await emit(null, { type: 'ladder.updated', id: updated.id, actor: req.user, data: { title: updated.name, kind: updated.kind, archived: updated.archived } });
+  res.json(updated);
 });
 
 export default router;

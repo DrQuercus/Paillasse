@@ -6,6 +6,7 @@ import { query } from '../db.js';
 import { assertAttachment, assertEntry } from '../lib/access.js';
 import { HttpError, notFound } from '../lib/errors.js';
 import { blobPath, storeBlob, tmpDir } from '../lib/storage.js';
+import { emit } from '../integrations/events.js';
 
 const router = Router();
 const upload = multer({ dest: tmpDir, limits: { fileSize: config.maxUploadMb * 1024 * 1024 } });
@@ -35,29 +36,51 @@ async function readDerivation(body, user) {
   return { derivedFrom, editParams };
 }
 
-router.post('/entries/:id/attachments', upload.single('file'), async (req, res) => {
-  const file = req.file;
-  if (!file) throw new HttpError(400, 'Aucun fichier reçu (champ « file »).');
+/**
+ * Joint un fichier (déjà écrit dans le dossier temporaire) à un brouillon. file : { path, filename, mimetype, size }.
+ * Le fichier temporaire est déplacé dans le stockage, ou effacé en cas d'erreur.
+ */
+export async function addAttachment(user, entryId, file, { derivedFrom = null, editParams = null } = {}) {
   try {
-    await assertEntry(req.user, req.params.id, { write: true });
-    const { rows: [entry] } = await query('SELECT status FROM entries WHERE id = $1', [req.params.id]);
+    await assertEntry(user, entryId, { write: true });
+    const { rows: [entry] } = await query('SELECT status, project_id, title FROM entries WHERE id = $1', [entryId]);
     if (!entry) throw notFound('Entrée');
     if (entry.status === 'locked') throw new HttpError(409, 'Entrée verrouillée : ajoutez le fichier dans un addendum.');
-    const { derivedFrom, editParams } = await readDerivation(req.body, req.user);
+    if (derivedFrom) await assertAttachment(user, derivedFrom);
     const sha = await storeBlob(file.path);
     const { rows } = await query(
       `INSERT INTO attachments
          (entry_id, sha256, filename, mime_type, size_bytes, created_by, created_at, derived_from, edit_params)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING ${COLUMNS}`,
-      [req.params.id, sha, fixName(file.originalname).slice(0, 255),
-        file.mimetype || 'application/octet-stream', file.size, req.user.id, new Date().toISOString(),
+      [entryId, sha, String(file.filename).slice(0, 255),
+        file.mimetype || 'application/octet-stream', file.size, user.id, new Date().toISOString(),
         derivedFrom, editParams ? JSON.stringify(editParams) : null],
     );
-    res.status(201).json(rows[0]);
+    await emit(null, {
+      type: 'attachment.created', id: rows[0].id, projectId: entry.project_id, actor: user,
+      data: { title: rows[0].filename, entry_id: entryId, entry_title: entry.title, mime_type: rows[0].mime_type, size_bytes: Number(rows[0].size_bytes) },
+    });
+    return rows[0];
   } finally {
     fs.promises.unlink(file.path).catch(() => {}); // déjà déplacé dans le cas normal
   }
+}
+
+router.post('/entries/:id/attachments', upload.single('file'), async (req, res) => {
+  const file = req.file;
+  if (!file) throw new HttpError(400, 'Aucun fichier reçu (champ « file »).');
+  let derivation;
+  try {
+    derivation = await readDerivation(req.body, req.user);
+  } catch (err) {
+    fs.promises.unlink(file.path).catch(() => {});
+    throw err;
+  }
+  const row = await addAttachment(req.user, req.params.id, {
+    path: file.path, filename: fixName(file.originalname), mimetype: file.mimetype, size: file.size,
+  }, derivation);
+  res.status(201).json(row);
 });
 
 router.get('/entries/:id/attachments', async (req, res) => {

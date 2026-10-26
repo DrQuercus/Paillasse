@@ -1,9 +1,11 @@
-// Réglages de l'application (table app_settings), gardés en mémoire : mode maintenance.
+// Réglages de l'application (table app_settings), gardés en mémoire : mode maintenance, intégrations.
 import { query } from '../db.js';
 
 const cache = new Map();
 const DEFAULTS = {
   maintenance: { on: false, message: '' },
+  // Ouverture aux autres outils : jetons d'accès (API, MCP) et webhooks sortants
+  integrations: { enabled: true, webhooks: true },
 };
 
 export async function loadSettings() {

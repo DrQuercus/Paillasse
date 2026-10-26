@@ -8,6 +8,13 @@ export default defineConfig({
   build: { chunkSizeWarningLimit: 1000 },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:3070' },
+    // (et ce que sert le serveur aux outils connectés : serveur MCP, llms.txt, pont MCP)
+    proxy: {
+      '/api': 'http://localhost:3070',
+      '/mcp': 'http://localhost:3070',
+      '/llms.txt': 'http://localhost:3070',
+      '/integrations/paillasse-mcp.mjs': 'http://localhost:3070',
+      '/.well-known': 'http://localhost:3070',
+    },
   },
 });

@@ -15,6 +15,7 @@ import { parseFasta, toFasta } from '../lib/seq/fasta.js';
 import { cutterSummary, digest } from '../lib/seq/enzymes.js';
 import { designExact, designFlanking } from '../lib/seq/primer3.js';
 import { simulatePcr } from '../lib/seq/pcr.js';
+import { emit } from '../integrations/events.js';
 
 const router = Router();
 const upload = multer({ dest: tmpDir, limits: { fileSize: 100 * 1024 * 1024, files: 30 } });
@@ -24,10 +25,10 @@ const utf8Name = (name) => {
 };
 
 const COMPLEMENT = { A: 'T', T: 'A', G: 'C', C: 'G', U: 'A', R: 'Y', Y: 'R', S: 'S', W: 'W', K: 'M', M: 'K', B: 'V', V: 'B', D: 'H', H: 'D', N: 'N' };
-const revcomp = (s) => [...s.toUpperCase()].reverse().map((c) => COMPLEMENT[c] ?? 'N').join('');
+export const revcomp = (s) => [...s.toUpperCase()].reverse().map((c) => COMPLEMENT[c] ?? 'N').join('');
 
 /** Reconnaît le format par le contenu (et l'extension en appoint). */
-function parseAny(buf, filename) {
+export function parseAny(buf, filename) {
   if (buf.length > 13 && buf[0] === 0x09 && buf.subarray(5, 13).toString('ascii') === 'SnapGene') {
     return [parseSnapGene(buf, filename)];
   }
@@ -41,16 +42,19 @@ function parseAny(buf, filename) {
   throw new HttpError(400, 'Format non reconnu (SnapGene .dna, GenBank ou FASTA attendus).');
 }
 
-async function insertSequence(db, parsed, userId, projectId, origin = null) {
+/** Insère une séquence (dans une transaction) et note l'événement. user : { id, display_name }. */
+async function insertSequence(db, parsed, user, projectId, origin = null) {
   const data = normalizeSequenceData(parsed);
   const { rows } = await db.query(
     `INSERT INTO sequences (name, description, project_id, sequence, circular, features, primers, length, created_by, origin)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, code, name, length, circular`,
     [String(parsed.name || 'Sans nom').slice(0, 300), String(parsed.description ?? '').slice(0, 10000), projectId || null,
-      data.sequence, data.circular, JSON.stringify(data.features), JSON.stringify(data.primers), data.sequence.length, userId,
+      data.sequence, data.circular, JSON.stringify(data.features), JSON.stringify(data.primers), data.sequence.length, user.id,
       origin ? JSON.stringify(origin) : null],
   );
-  return rows[0];
+  const s = rows[0];
+  await emit(db, { type: 'sequence.created', id: s.id, projectId: projectId || null, actor: user, data: { title: s.name, code: s.code, length: s.length, circular: s.circular } });
+  return s;
 }
 
 // --- Droits ----------------------------------------------------------------------
@@ -66,9 +70,10 @@ router.param('id', (req, _res, next, id) => {
 
 // --- Registre -------------------------------------------------------------------
 
-router.get('/', async (req, res) => {
-  if (req.query.project_id) await assertProject(req.user, req.query.project_id);
-  const q = String(req.query.q ?? '').trim();
+/** Registre : recherche par nom, code, description ou bases (8 au moins, les deux brins). */
+export async function listSequences(user, { q: rawQ = '', project_id: projectId = null, limit = 500, offset = 0 } = {}) {
+  if (projectId) await assertProject(user, projectId);
+  const q = String(rawQ ?? '').trim();
   const bases = q.replace(/\s+/g, '');
   const isDna = bases.length >= 8 && /^[ACGTURYSWKMBDHVN]+$/i.test(bases);
   const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -84,11 +89,14 @@ router.get('/', async (req, res) => {
        AND ($3::uuid IS NULL OR s.project_id = $3)
        AND ($3::uuid IS NOT NULL OR s.project_id IS NULL OR s.project_id IN ${visibleProjects('$7')})
      ORDER BY s.updated_at DESC
-     LIMIT 500`,
-    [q, like, req.query.project_id || null, isDna, bases.toUpperCase(), isDna ? revcomp(bases) : '', req.user.id],
+     LIMIT $8 OFFSET $9`,
+    [q, like, projectId || null, isDna, bases.toUpperCase(), isDna ? revcomp(bases) : '', user.id,
+      Math.min(500, Math.max(1, Number(limit) || 500)), Math.max(0, Math.trunc(Number(offset) || 0))],
   );
-  res.json(rows);
-});
+  return rows;
+}
+
+router.get('/', async (req, res) => res.json(await listSequences(req.user, req.query)));
 
 // Import de fichiers : .dna, .gb/.gbk, .fa/.fasta (plusieurs à la fois)
 router.post('/import', upload.array('files', 30), async (req, res) => {
@@ -107,7 +115,7 @@ router.post('/import', upload.array('files', 30), async (req, res) => {
       const sha = await storeBlob(file.path);
       await tx(async (db) => {
         for (const rec of records) {
-          const seq = await insertSequence(db, rec.name ? rec : { ...rec, name: filename }, req.user.id, req.body?.project_id);
+          const seq = await insertSequence(db, rec.name ? rec : { ...rec, name: filename }, req.user, req.body?.project_id);
           await db.query(
             `INSERT INTO sequence_files (sequence_id, sha256, filename, mime_type, size_bytes, created_by)
              VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -125,29 +133,34 @@ router.post('/import', upload.array('files', 30), async (req, res) => {
   res.status(created.length ? 201 : 400).json({ created, errors });
 });
 
-// Création : séquence collée (brute, FASTA ou GenBank) ou vide
-router.post('/', async (req, res) => {
-  const b = req.body ?? {};
-  await assertProject(req.user, b.project_id || null, { write: true });
+/** Création depuis un texte collé (brut, FASTA ou GenBank ; plusieurs enregistrements possibles) ou vide. */
+export async function createSequences(user, b = {}) {
+  await assertProject(user, b.project_id || null, { write: true });
   const text = String(b.text ?? '').trim();
   const records = text ? parseAny(Buffer.from(text), b.name || 'Nouvelle séquence') : [{ sequence: '', features: [], primers: [] }];
-  const created = await tx(async (db) => {
+  return tx(async (db) => {
     const out = [];
     for (const rec of records) {
       out.push(await insertSequence(db, {
         ...rec,
-        name: b.name?.trim() || rec.name || 'Nouvelle séquence',
+        name: (records.length === 1 && b.name?.trim()) || rec.name || b.name?.trim() || 'Nouvelle séquence',
+        description: b.description ?? rec.description,
         circular: b.circular ?? rec.circular ?? false,
-      }, req.user.id, b.project_id));
+      }, user, b.project_id));
     }
     return out;
   });
+}
+
+// Création : séquence collée (brute, FASTA ou GenBank) ou vide
+router.post('/', async (req, res) => {
+  const created = await createSequences(req.user, req.body ?? {});
   res.status(201).json({ created, errors: [] });
 });
 
 // --- Une séquence ----------------------------------------------------------------
 
-async function loadSequence(id) {
+export async function loadSequence(id) {
   const { rows } = await query(
     `SELECT s.*, p.name AS project_name, p.color AS project_color, u.display_name AS created_by_name
      FROM sequences s JOIN users u ON u.id = s.created_by LEFT JOIN projects p ON p.id = s.project_id
@@ -190,15 +203,20 @@ router.put('/:id', async (req, res) => {
       data ? JSON.stringify(data.features) : null, data ? JSON.stringify(data.primers) : null,
       data ? data.sequence.length : null, b.revision],
   );
-  if (rows[0]) return res.json(rows[0]);
+  if (rows[0]) {
+    const { rows: [s] } = await query('SELECT project_id, name, code FROM sequences WHERE id = $1', [req.params.id]);
+    await emit(null, { type: 'sequence.updated', id: req.params.id, projectId: s.project_id, actor: req.user, data: { title: s.name, code: s.code, revision: rows[0].revision } });
+    return res.json(rows[0]);
+  }
   const { rows: cur } = await query('SELECT revision, archived FROM sequences WHERE id = $1', [req.params.id]);
   if (!cur[0]) throw notFound('Séquence');
   res.status(409).json({ code: 'conflict', revision: cur[0].revision, error: 'Séquence modifiée ailleurs (autre onglet ?). Rechargez la page.' });
 });
 
 router.post('/:id/archive', async (req, res) => {
-  const { rowCount } = await query('UPDATE sequences SET archived = true, updated_at = now() WHERE id = $1', [req.params.id]);
-  if (!rowCount) throw notFound('Séquence');
+  const { rows } = await query('UPDATE sequences SET archived = true, updated_at = now() WHERE id = $1 RETURNING project_id, name, code', [req.params.id]);
+  if (!rows[0]) throw notFound('Séquence');
+  await emit(null, { type: 'sequence.archived', id: req.params.id, projectId: rows[0].project_id, actor: req.user, data: { title: rows[0].name, code: rows[0].code } });
   res.json({ ok: true });
 });
 
@@ -214,11 +232,11 @@ const sameData = (a, b) => canonicalize([a.name, a.sequence, a.circular, a.featu
   === canonicalize([b.name, b.sequence, b.circular, b.features, b.primers]);
 
 /** Fige l'état actuel d'une séquence dans une nouvelle version. Renvoie son numéro. */
-async function freezeVersion(db, s, userId, note = '') {
+async function freezeVersion(db, s, user, note = '') {
   const v = {
     sequence_id: s.id, version_number: s.version_count + 1, note, name: s.name, description: s.description,
     sequence: s.sequence, circular: s.circular, features: s.features, primers: s.primers,
-    created_by: userId, created_at: new Date().toISOString(),
+    created_by: user.id, created_at: new Date().toISOString(),
   };
   const contentHash = sha256(canonicalize(sealed(v)));
   const hash = chain(s.last_version_hash, contentHash);
@@ -230,13 +248,16 @@ async function freezeVersion(db, s, userId, note = '') {
       JSON.stringify(v.features), JSON.stringify(v.primers), v.created_by, v.created_at, contentHash, s.last_version_hash, hash],
   );
   await db.query('UPDATE sequences SET version_count = $2, last_version_hash = $3 WHERE id = $1', [s.id, v.version_number, hash]);
+  await emit(db, { type: 'sequence.version_created', id: s.id, projectId: s.project_id, actor: user, data: { title: s.name, code: s.code, version_number: v.version_number, hash, note } });
   return v.version_number;
 }
 
-router.post('/:id/versions', async (req, res) => {
-  const note = String(req.body?.note ?? '').slice(0, 500);
-  const result = await tx(async (db) => {
-    const { rows: [s] } = await db.query('SELECT * FROM sequences WHERE id = $1 FOR UPDATE', [req.params.id]);
+/** Fige une version d'une séquence (rien si rien n'a changé et sans note). */
+export async function freezeSequenceVersion(user, id, noteText = '') {
+  const note = String(noteText ?? '').slice(0, 500);
+  await assertSequence(user, id, { write: true });
+  return tx(async (db) => {
+    const { rows: [s] } = await db.query('SELECT * FROM sequences WHERE id = $1 FOR UPDATE', [id]);
     if (!s) throw notFound('Séquence');
     if (s.version_count > 0) {
       const { rows: [last] } = await db.query(
@@ -247,7 +268,7 @@ router.post('/:id/versions', async (req, res) => {
     const v = {
       sequence_id: s.id, version_number: s.version_count + 1, note, name: s.name, description: s.description,
       sequence: s.sequence, circular: s.circular, features: s.features, primers: s.primers,
-      created_by: req.user.id, created_at: new Date().toISOString(),
+      created_by: user.id, created_at: new Date().toISOString(),
     };
     const contentHash = sha256(canonicalize(sealed(v)));
     const hash = chain(s.last_version_hash, contentHash);
@@ -259,8 +280,13 @@ router.post('/:id/versions', async (req, res) => {
         JSON.stringify(v.features), JSON.stringify(v.primers), v.created_by, v.created_at, contentHash, s.last_version_hash, hash],
     );
     await db.query('UPDATE sequences SET version_count = $2, last_version_hash = $3 WHERE id = $1', [s.id, v.version_number, hash]);
+    await emit(db, { type: 'sequence.version_created', id: s.id, projectId: s.project_id, actor: user, data: { title: s.name, code: s.code, version_number: v.version_number, hash, note } });
     return { unchanged: false, version: { version_number: v.version_number, hash, created_at: v.created_at, note } };
   });
+}
+
+router.post('/:id/versions', async (req, res) => {
+  const result = await freezeSequenceVersion(req.user, req.params.id, req.body?.note);
   res.status(result.unchanged ? 200 : 201).json(result);
 });
 
@@ -274,7 +300,7 @@ router.get('/:id/versions', async (req, res) => {
   res.json(rows);
 });
 
-async function loadVersion(id, n) {
+export async function loadVersion(id, n) {
   const { rows } = await query(
     `SELECT v.*, s.code, u.display_name AS author FROM sequence_versions v
      JOIN sequences s ON s.id = v.sequence_id JOIN users u ON u.id = v.created_by
@@ -382,7 +408,7 @@ function pcrPrimers(body) {
 }
 
 /** Version allégée d'un produit : la séquence complète n'est renvoyée qu'une fois. */
-const productSummary = (p) => ({
+export const productSummary = (p) => ({
   length: p.length,
   region: p.region,
   offset: p.offset,
@@ -422,7 +448,7 @@ router.post('/:id/pcr/create', async (req, res) => {
       'SELECT * FROM sequence_versions WHERE sequence_id = $1 ORDER BY version_number DESC LIMIT 1', [s.id],
     );
     if (!last || !sameData(last, s)) {
-      version = await freezeVersion(db, s, req.user.id, 'avant PCR virtuelle');
+      version = await freezeVersion(db, s, req.user, 'avant PCR virtuelle');
     }
     const r = simulatePcr(s, forward, reverse);
     const product = r.products[index];
@@ -446,7 +472,7 @@ router.post('/:id/pcr/create', async (req, res) => {
       circular: false,
       features: product.features,
       primers: product.primers,
-    }, req.user.id, req.body?.project_id ?? s.project_id, origin);
+    }, req.user, req.body?.project_id ?? s.project_id, origin);
   });
   res.status(201).json(created);
 });

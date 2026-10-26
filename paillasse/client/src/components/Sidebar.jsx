@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BookOpen, Calculator, ChartColumn, Columns4, Dna, Download, FilePlus2, KeyRound, LayoutTemplate, LogOut, MailPlus, Menu, Plus, Search, Snowflake, Users, Wrench, X,
+  BookOpen, Calculator, ChartColumn, Columns4, Dna, Download, FilePlus2, KeyRound, LayoutTemplate, LogOut, MailPlus, Menu, Plug, Plus, Search, Snowflake, Users, Wrench, X,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { useApp } from '../context.js';
@@ -84,6 +84,7 @@ export default function Sidebar() {
           <NavLink to="/stats" className="nav-link"><ChartColumn size={16} /> Statistiques</NavLink>
           <NavLink to="/calc" className="nav-link"><Calculator size={16} /> Calculs</NavLink>
           <NavLink to="/templates" className="nav-link"><LayoutTemplate size={16} /> Modèles</NavLink>
+          <NavLink to="/integrations" className="nav-link"><Plug size={16} /> Intégrations</NavLink>
           {user.is_admin && <NavLink to="/maintenance" className="nav-link nav-admin"><Wrench size={16} /> Maintenance</NavLink>}
         </nav>
 

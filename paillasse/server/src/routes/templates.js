@@ -6,6 +6,7 @@ import { assertEntry } from '../lib/access.js';
 import {
   isModified, libraryTemplate, templateHash, templateOutline, templateTools,
 } from '../lib/templates.js';
+import { emit } from '../integrations/events.js';
 
 const router = Router();
 
@@ -73,6 +74,7 @@ router.post('/', async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $5) RETURNING *`,
     [name, description, category, JSON.stringify(content), req.user.id],
   );
+  await emit(null, { type: 'template.created', id: rows[0].id, actor: req.user, data: { title: rows[0].name, category: rows[0].category } });
   res.status(201).json(full(rows[0]));
 });
 
@@ -94,6 +96,7 @@ router.put('/:id', async (req, res) => {
       b.category === undefined ? null : cleanCategory(b.category), req.user.id],
   );
   if (!rows[0]) throw notFound('Modèle');
+  await emit(null, { type: 'template.updated', id: rows[0].id, actor: req.user, data: { title: rows[0].name, category: rows[0].category } });
   res.json(full(rows[0]));
 });
 
@@ -109,19 +112,22 @@ router.post('/:id/reset', async (req, res) => {
      WHERE id = $1 RETURNING *`,
     [req.params.id, t.name, t.description, t.category, JSON.stringify(t.content), templateHash(t), req.user.id],
   );
+  await emit(null, { type: 'template.updated', id: rows[0].id, actor: req.user, data: { title: rows[0].name, reset: true } });
   res.json(full(rows[0]));
 });
 
 router.post('/:id/restore', async (req, res) => {
-  const { rowCount } = await query('UPDATE templates SET archived = false, updated_at = now() WHERE id = $1', [req.params.id]);
-  if (!rowCount) throw notFound('Modèle');
+  const { rows } = await query('UPDATE templates SET archived = false, updated_at = now() WHERE id = $1 RETURNING name', [req.params.id]);
+  if (!rows[0]) throw notFound('Modèle');
+  await emit(null, { type: 'template.updated', id: req.params.id, actor: req.user, data: { title: rows[0].name, restored: true } });
   res.json({ ok: true });
 });
 
 // Les modèles ne sont pas des données du cahier : on les archive simplement
 router.delete('/:id', async (req, res) => {
-  const { rowCount } = await query('UPDATE templates SET archived = true, updated_at = now() WHERE id = $1', [req.params.id]);
-  if (!rowCount) throw notFound('Modèle');
+  const { rows } = await query('UPDATE templates SET archived = true, updated_at = now() WHERE id = $1 RETURNING name', [req.params.id]);
+  if (!rows[0]) throw notFound('Modèle');
+  await emit(null, { type: 'template.archived', id: req.params.id, actor: req.user, data: { title: rows[0].name } });
   res.json({ ok: true });
 });
 
