@@ -8,6 +8,7 @@ import { listSequences } from '../../routes/sequences.js';
 import { searchSamples } from '../../routes/inventory.js';
 import { listDatasets } from '../../routes/datasets.js';
 import { EVENT_TYPES, eventView, visibleEvent } from '../events.js';
+import { unlinkedMessage } from '../assistant.js';
 import { define } from '../registry.js';
 import { bool, int, list, oneOf, params, str, uuid } from '../schema.js';
 import { compact, isoDate, isoTime, webUrl } from './common.js';
@@ -19,12 +20,15 @@ define({
   title: 'Qui suis-je',
   group: 'Cahier',
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/me' },
-  description: 'Compte au nom duquel l’outil agit, droits du jeton (lecture seule ou lecture et écriture), projets visibles, '
-    + 'et conseils pour bien utiliser Paillasse. À appeler en premier pour s’orienter.',
+  allowUnlinked: true,
+  description: 'Qui est la personne pour Paillasse : son compte, ce que l’accès lui permet (lecture seule, ou lecture et écriture), '
+    + 'ses projets, et des conseils. À appeler en premier pour s’orienter, ou quand elle demande à quoi elle a accès.',
   input: params({}),
   async handler(_a, ctx) {
+    if (!ctx.user) {
+      return { linked: false, assistant_account: compact({ email: ctx.assistant?.email, name: ctx.assistant?.name }), message: unlinkedMessage(ctx.assistant) };
+    }
     const projects = await listProjects(ctx.user);
     const { rows: [counts] } = await query(
       `SELECT (SELECT count(*) FROM entries WHERE NOT archived AND project_id IN ${visibleProjects('$1')})::int AS entries,
@@ -34,7 +38,9 @@ define({
     );
     return {
       user: { id: ctx.user.id, username: ctx.user.username, name: ctx.user.display_name },
-      access: ctx.token ? { via: 'jeton', token: ctx.token.name, scope: ctx.token.scope === 'write' ? 'lecture et écriture' : 'lecture seule' } : { via: 'session' },
+      access: ctx.token
+        ? { via: ctx.token.kind === 'assistant' ? 'assistant' : 'jeton', token: ctx.token.name, scope: ctx.token.scope === 'write' ? 'lecture et écriture' : 'lecture seule' }
+        : { via: 'session' },
       server: { name: 'Paillasse', kind: 'cahier de laboratoire électronique', version: PKG_VERSION, url: webUrl(ctx, '/') },
       counts: { projects: projects.length, ...counts },
       projects: projects.map((p) => ({ id: p.id, name: p.name, role: p.role, entries: p.entry_count })),
@@ -55,7 +61,6 @@ define({
   title: 'Lister les projets',
   group: 'Projets',
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/projects' },
   description: 'Liste les projets visibles (les vôtres et ceux où vous avez accepté une invitation) avec leur nombre d’entrées '
     + 'et la date de la dernière.',
@@ -138,13 +143,12 @@ define({
   title: 'Chercher dans le cahier',
   group: 'Cahier',
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/search' },
   description: 'Cherche dans tout le cahier : entrées (plein texte en français, préfixes : « purif » trouve « purification »), '
     + 'séquences (nom, code, description, ou bases ACGT), tubes du stockage (nom, code, notes), jeux de données, modèles, projets. '
-    + 'Renvoie des résultats typés avec un extrait et une adresse.',
+    + 'À employer dès que l’on cherche quelque chose du labo sans savoir où c’est. Renvoie des résultats typés avec un extrait et une adresse.',
   input: params({
-    query: str('Ce que l’on cherche.', { minLength: 1, maxLength: 200 }),
+    query: str('Ce que l’on cherche, ex. « purification DegU », « pET28 », « ECH-0042 ».', { minLength: 1, maxLength: 200 }),
     types: list({ type: 'string', enum: KINDS }, `Où chercher (par défaut partout) : ${KINDS.join(', ')}.`),
     limit: int('Résultats au plus par type (1 à 50).', { minimum: 1, maximum: 50, default: 10 }),
   }, ['query']),
@@ -209,10 +213,10 @@ define({
   title: 'Activité récente',
   group: 'Cahier',
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/activity' },
   description: 'Ce qui s’est passé récemment dans le cahier (entrées créées, modifiées, verrouillées, versions, tubes rangés '
-    + 'ou déplacés, séquences, jeux de données…), du plus récent au plus ancien, avec qui et quand. Idéal pour un résumé de la semaine.',
+    + 'ou déplacés, séquences, jeux de données…), du plus récent au plus ancien, avec qui et quand. À employer pour « qu’est-ce '
+    + 'qui a été fait cette semaine ? » ou pour un bilan.',
   input: params({
     since: { type: 'string', format: 'date-time', description: 'Depuis (date ISO, ex. 2026-10-19 ou 2026-10-19T08:00:00Z). Par défaut : 7 jours.' },
     types: list({ type: 'string', maxLength: 60 }, 'Types d’événements (entry.locked…) ou familles (entry.*, sample.*).'),

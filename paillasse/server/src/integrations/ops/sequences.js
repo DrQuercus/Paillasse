@@ -51,12 +51,11 @@ define({
   title: 'Chercher des séquences',
   group: GROUP,
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/sequences' },
   description: 'Cherche dans le registre de séquences (plasmides, fragments, amorces) : par nom, code, description, ou par bases '
     + '(8 au moins, sur les deux brins). Sans recherche : les plus récemment modifiées.',
   input: params({
-    query: str('Nom, code (SEQ-0001), mot de la description, ou bases (ACGT…).', { maxLength: 2000 }),
+    query: str('Nom, code, mot de la description, ou bases, ex. « pET28 », « SEQ-0012 », « GAATTCATG… ».', { maxLength: 2000 }),
     project_id: uuid('Seulement les séquences de ce projet.'),
     limit: int('Nombre de séquences (1 à 200).', { minimum: 1, maximum: 200, default: 50 }),
     offset: int('Décalage pour la page suivante.', { minimum: 0, default: 0 }),
@@ -80,7 +79,6 @@ define({
   title: 'Lire une séquence',
   group: GROUP,
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/sequences/{sequence_id}' },
   description: 'Lit une séquence du registre : longueur, forme (circulaire ou linéaire), %GC, annotations (positions à partir de 1), '
     + 'amorces, origine (PCR…), versions. format = genbank ou fasta pour le fichier complet ; include_bases pour les bases en clair.',

@@ -2279,6 +2279,7 @@ a.menu-item { color: var(--ink); text-decoration: none; }
 .int-snippet { margin: 0; min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .int-snippet figcaption { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .3rem .4rem .3rem .75rem; background: #F6F8FA; border-bottom: 1px solid var(--line); font-size: .8rem; color: var(--ink-2); }
 .int-snippet pre { margin: 0; padding: .7rem .85rem; font: .8rem/1.55 var(--mono); white-space: pre; overflow-x: auto; background: #fff; }
+.int-snippet.is-wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow-y: auto; }
 .int-addresses { display: flex; flex-direction: column; gap: .45rem; }
 .int-address { display: grid; grid-template-columns: minmax(9rem, auto) minmax(0, 1fr) auto; align-items: center; gap: .2rem .7rem; }
 .int-address-label { font-size: .84rem; color: var(--ink-3); }
@@ -2313,3 +2314,7 @@ a.menu-item { color: var(--ink); text-decoration: none; }
   .int-ops li > span:not(.int-badge), .int-ops li > small { grid-column: 1; grid-row: auto; }
   .int-row { grid-template-columns: 1fr; }
 }
+.int-link-code { display: flex; flex-direction: column; gap: .5rem; }
+.int-link-code .adm-password > code { font-size: 1.5rem; letter-spacing: .12em; }
+.int-link-code p { margin: 0; }
+.int-link-code q { font-weight: 500; }

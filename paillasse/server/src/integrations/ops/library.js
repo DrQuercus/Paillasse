@@ -169,7 +169,7 @@ define({
   scope: 'read',
   http: { method: 'GET', path: '/templates' },
   description: 'Modèles d’entrée du labo (protocoles prêts à remplir : PCR, miniprep, western blot, purification…) : nom, catégorie, '
-    + 'sections, outils inclus. Pour créer une entrée depuis un modèle : create_entry avec template_id.',
+    + 'sections, outils inclus. À employer pour préparer une manip ; pour créer une entrée depuis un modèle : create_entry avec template_id.',
   input: params({
     query: str('Mot du nom, de la description ou de la catégorie.', { maxLength: 200 }),
     category: str('Catégorie exacte.', { maxLength: 60 }),

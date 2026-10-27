@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { getSetting } from './lib/settings.js';
 import { bearerToken, rateLimit, tokenUser } from './integrations/tokens.js';
+import { assistantIdentity, assistantName, linkOfSubject, noteAssistantUse } from './integrations/assistant.js';
 
 export const SESSION_COOKIE = 'paillasse_session';
 
@@ -84,19 +85,40 @@ export function parseCookies(req, _res, next) {
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
- * Compte de la requête : jeton d'accès (Authorization: Bearer pai_…) ou cookie de session. Un autre type
- * d'en-tête Authorization (authentification du serveur web, par exemple) est ignoré.
- * Renvoie { user, token } ou { error: [statut, message] }.
+ * Compte de la requête : jeton d'accès (Authorization: Bearer pai_…), personne venue par l'assistant IA du labo
+ * (API v1 et MCP seulement, voir integrations/assistant.js), ou cookie de session. Un autre type d'en-tête
+ * Authorization (authentification du serveur web, par exemple) est ignoré ailleurs.
+ * Renvoie { user, token, assistant? }, { unlinked: identité } ou { error: [statut, message] }.
  */
 export async function authenticate(req) {
   const value = bearerToken(req);
-  if (value === null) return { user: await sessionUser(req), token: null };
-  const found = await tokenUser(value, req.ip);
-  if (!found) return { error: [401, 'Jeton d’accès invalide, expiré ou révoqué.'] };
-  if (!getSetting('integrations').enabled) {
-    return { error: [403, 'L’accès par jeton (API, IA, automatisations) est désactivé par l’administrateur du cahier.'] };
+  if (value !== null) {
+    const found = await tokenUser(value, req.ip);
+    if (!found) return { error: [401, 'Jeton d’accès invalide, expiré ou révoqué.'] };
+    if (!getSetting('integrations').enabled) {
+      return { error: [403, 'L’accès par jeton (API, IA, automatisations) est désactivé par l’administrateur du cahier.'] };
+    }
+    return found;
   }
-  return found;
+  if (req.scopeByOperation) {
+    const a = await assistantIdentity(req);
+    if (a?.error) return { error: a.error };
+    if (a) return assistantAccount(a.identity);
+  }
+  return { user: await sessionUser(req), token: null };
+}
+
+/** Compte Paillasse relié à la personne qui parle à l'assistant ; ses droits, jamais ceux d'un administrateur. */
+async function assistantAccount(identity) {
+  const link = await linkOfSubject(identity.subject);
+  if (!link) return { unlinked: identity };
+  if (link.disabled_at || link.deleted_at) return { error: [401, 'Ce compte Paillasse est désactivé.'] };
+  noteAssistantUse(link.id);
+  return {
+    user: { id: link.user_id, username: link.username, display_name: link.display_name, is_admin: false, must_change_password: link.must_change_password },
+    token: { id: `assistant:${link.id}`, name: assistantName(), scope: link.scope, kind: 'assistant' },
+    assistant: identity,
+  };
 }
 
 /**
@@ -107,8 +129,22 @@ export async function authenticate(req) {
 export async function requireAuth(req, res, next) {
   const auth = await authenticate(req);
   // API v1 et MCP : les outils attendent l'en-tête standard qui dit comment s'authentifier
-  if (req.scopeByOperation && (auth.error?.[0] === 401 || (!auth.error && !auth.user))) res.set('WWW-Authenticate', 'Bearer realm="Paillasse"');
+  if (req.scopeByOperation && (auth.error?.[0] === 401 || (!auth.error && !auth.user && !auth.unlinked))) res.set('WWW-Authenticate', 'Bearer realm="Paillasse"');
   if (auth.error) return res.status(auth.error[0]).json({ error: auth.error[1] });
+  if (auth.unlinked) {
+    // Venue par l'assistant, compte pas encore relié : seules l'orientation et la liaison lui répondent
+    const pause = getSetting('maintenance');
+    if (pause.on) return res.status(503).json({ error: pause.message || 'Maintenance en cours.', maintenance: true });
+    const wait = rateLimit(`assistant:${auth.unlinked.subject}`);
+    if (wait) {
+      res.set('Retry-After', String(wait));
+      return res.status(429).json({ error: `Trop de requêtes : réessayez dans ${wait} s.` });
+    }
+    req.user = null;
+    req.assistantIdentity = auth.unlinked;
+    req.apiToken = { id: `assistant-unlinked:${auth.unlinked.subject}`, name: assistantName(), scope: 'read', kind: 'assistant' };
+    return next();
+  }
   const { user, token } = auth;
   if (!user) {
     return res.status(401).json({ error: req.scopeByOperation ? 'Jeton d’accès requis : en-tête Authorization: Bearer pai_… (jeton créé dans Paillasse, page Intégrations).' : 'Connexion requise' });
@@ -119,6 +155,7 @@ export async function requireAuth(req, res, next) {
     return res.status(503).json({ error: maintenance.message || 'Maintenance en cours.', maintenance: true });
   }
   req.user = { ...publicUser(user), is_admin: Boolean(user.is_admin) && !token };
+  if (auth.assistant) req.assistantIdentity = auth.assistant;
   if (token) {
     req.apiToken = token;
     const wait = rateLimit(token.id);

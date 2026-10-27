@@ -12,7 +12,8 @@ export default function ReferenceCard({ endpoints: e, operations }) {
   return (
     <Card title="Référence" icon={BookOpenText}>
       <div className="int-addresses">
-        <Address label="Serveur MCP" value={e.mcp} hint="Streamable HTTP, sans état. ?profile=essential : une douzaine d’outils." />
+        <Address label="Serveur MCP" value={e.mcp} hint="Streamable HTTP, sans état. ?profile=assistant : outils choisis pour une IA de labo." />
+        <Address label="API de l’assistant" value={e.assistant_api} hint="Serveur d’outils OpenAPI (description : openapi.json), noms préfixés, écriture en deux temps." />
         <Address label="API REST" value={e.api} hint="Jeton dans l’en-tête Authorization: Bearer pai_…" />
         <Address label="Description OpenAPI" value={e.openapi} href={e.openapi} />
         <Address label="Changements" value={e.changes} hint="Curseur : ce qui a changé depuis le dernier passage." />

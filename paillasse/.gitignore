@@ -4,3 +4,9 @@ server/.env
 data/
 *.dump
 client/public/vendor/
+
+# Secrets et jetons : jamais dans le dépôt
+.env
+*.jeton
+# Consignes locales (Claude Code) propres à une installation
+CLAUDE.local.md

@@ -331,9 +331,10 @@ async function handOverProjects(c, userId, actorId) {
 export async function deleteUser(userId, { data = 'keep', anonymize = false, actorId }) {
   return withPurge(async (c) => {
     const out = { removed: {}, full: false };
-    // Ses accès extérieurs (jetons d'API, webhooks) disparaissent dans tous les cas
+    // Ses accès extérieurs (jetons d'API, webhooks, liaison avec l'assistant IA) disparaissent dans tous les cas
     out.removed.api_tokens = (await c.query('DELETE FROM api_tokens WHERE user_id = $1', [userId])).rowCount;
     out.removed.webhooks = (await c.query('DELETE FROM webhooks WHERE user_id = $1', [userId])).rowCount;
+    out.removed.assistant_links = (await c.query('DELETE FROM assistant_links WHERE user_id = $1', [userId])).rowCount;
     if (data === 'delete') {
       const { rows: e } = await c.query('SELECT id FROM entries WHERE created_by = $1', [userId]);
       Object.assign(out.removed, await deleteEntries(c, e.map((r) => r.id)));

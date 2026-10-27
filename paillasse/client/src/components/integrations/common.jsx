@@ -4,10 +4,10 @@ export const TOKEN_PLACEHOLDER = 'pai_VOTRE_JETON';
 
 export const SCOPE_LABELS = { read: 'Lecture seule', write: 'Lecture et écriture' };
 
-/** Bloc de code à copier (configuration d'un outil, exemple de script). */
-export function Snippet({ title, text }) {
+/** Bloc de code à copier (configuration d'un outil, exemple de script) ; wrap : texte suivi, renvoyé à la ligne. */
+export function Snippet({ title, text, wrap = false }) {
   return (
-    <figure className="int-snippet">
+    <figure className={`int-snippet${wrap ? ' is-wrap' : ''}`}>
       <figcaption>
         <span>{title}</span>
         <CopyButton text={text} />

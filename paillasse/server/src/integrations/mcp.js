@@ -4,13 +4,18 @@
 //   tools      toutes les opérations du registre (lecture seule si le jeton l'est) ;
 //   resources  les entrées, séquences, tubes, projets, modèles et jeux de données, lisibles par adresse paillasse://… ;
 //   prompts    des consignes prêtes à l'emploi (résumer une entrée, bilan d'un projet, préparer une manip…).
-// Paramètres d'adresse : ?profile=essential (une douzaine d'outils, pour les petits modèles), ?tools=nom1,nom2.
+// Paramètres d'adresse : ?profile=assistant (outils choisis pour une IA de labo à petite fenêtre de contexte,
+// réponses courtes, écriture en deux temps ; « essential » en est un alias), ?tools=nom1,nom2.
+// La personne qui parle à l'assistant IA du labo peut aussi être reconnue (voir assistant.js) : Paillasse lui
+// répond avec ses droits ; tant que son compte n'est pas relié, seuls l'orientation et la liaison répondent.
 import { Router } from 'express';
+import { config } from '../config.js';
 import { query } from '../db.js';
 import { originOf } from '../lib/markdownExport.js';
 import { visibleProjects } from '../lib/access.js';
-import { getOperation, invoke, listOperations } from './registry.js';
+import { descriptionFor, getOperation, inputFor, invoke, listOperations, profileOf } from './registry.js';
 import { publicSchema } from './schema.js';
+import { fitResponse, unlinkedMessage } from './assistant.js';
 import './ops/index.js';
 
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -24,14 +29,23 @@ Pour commencer : whoami (droits et projets), puis search pour trouver, get_entry
 Règles : citer l'adresse (url) des objets utilisés ; ne jamais verrouiller une entrée (lock_entry) sans demande explicite ;
 une entrée verrouillée se complète par un addendum (create_addendum) ; écrire en Markdown ; dates au format AAAA-MM-JJ.`;
 
+const TWO_PHASE = `Écriture en deux temps : une création ou une modification rend d'abord un aperçu (rien n'est enregistré) et un code ;
+montrer l'aperçu à la personne et attendre sa réponse, puis rappeler le même outil avec les mêmes paramètres et confirmation = ce code, seulement si elle est d'accord.
+N'écrire aucune séquence (ADN, protéine) : Paillasse la refuse, la citer par son code SEQ-…. Une réponse raccourcie (truncated) ou en parties (part) se complète en demandant la suite.`;
+
+const profileOfReq = (req) => profileOf(req.query.profile);
+const twoPhaseFor = (req) => profileOfReq(req) === 'assistant' || req.apiToken?.kind === 'assistant';
+const instructionsFor = (req) => (twoPhaseFor(req) ? `${INSTRUCTIONS}\n${TWO_PHASE}` : INSTRUCTIONS);
+const unlinkedError = (req) => Object.assign(new Error(unlinkedMessage(req.assistantIdentity)), { rpc: -32001 });
+
 // --- Outils -----------------------------------------------------------------------------------------------------
 
-function toolOf(op) {
+function toolOf(op, profile) {
   return {
     name: op.name,
     title: op.title,
-    description: op.description,
-    inputSchema: publicSchema(op.input),
+    description: descriptionFor(op, profile),
+    inputSchema: publicSchema(inputFor(op, profile)),
     annotations: {
       title: op.title,
       readOnlyHint: op.scope === 'read',
@@ -43,27 +57,40 @@ function toolOf(op) {
 
 function visibleTools(req) {
   const only = req.query.tools ? String(req.query.tools).split(',').map((s) => s.trim()).filter(Boolean) : null;
-  const profile = req.query.profile === 'essential' ? 'essential' : 'full';
-  return listOperations({ scope: req.apiToken?.scope ?? 'write', profile, only });
+  // Écriture en deux temps (assistant) : pas de geste irréversible, réservé à la personne
+  const ops = listOperations({ scope: req.apiToken?.scope ?? 'write', profile: profileOfReq(req), only })
+    .filter((op) => !(op.humanOnly && twoPhaseFor(req)));
+  // Venue par l'assistant : la liaison du compte est toujours proposée ; non reliée, elle seule (avec l'orientation)
+  const link = getOperation('link_account');
+  if (req.assistantIdentity && link && !ops.includes(link)) ops.push(link);
+  return req.user ? ops : ops.filter((op) => op.allowUnlinked);
 }
 
-function textOf(op, result, args) {
-  let text = op.text?.(result, args) ?? null;
+function textOf(op, result, args, max) {
+  let text = (result?.dry_run ? null : op.text?.(result, args)) ?? null;
   if (text === null) text = JSON.stringify(result);
-  if (text.length > MAX_TEXT) text = `${text.slice(0, MAX_TEXT)}\n… (réponse tronquée à ${MAX_TEXT} caractères : affinez la demande, par exemple avec limit ou un filtre)`;
+  if (text.length > max) text = `${text.slice(0, max)}\n… (réponse tronquée à ${max} caractères : affinez la demande, par exemple avec limit, offset, part ou un filtre)`;
   return text;
 }
 
 async function callTool(req, params) {
   const name = String(params?.name ?? '');
   const op = getOperation(name);
-  if (!op || !visibleTools(req).includes(op)) {
+  // Un geste réservé à la personne reste appelable, pour que le refus dise pourquoi (registry.invoke)
+  if (!op || !(visibleTools(req).includes(op) || (op.humanOnly && twoPhaseFor(req) && req.user))) {
     throw Object.assign(new Error(`Outil inconnu : ${name}`), { rpc: -32602 });
   }
   try {
-    const { result, args } = await invoke(name, params?.arguments ?? {}, { user: req.user, token: req.apiToken ?? null, origin: originOf(req) });
-    const content = [{ type: 'text', text: textOf(op, result, args) }, ...(op.content?.(result) ?? [])];
-    const structured = result && typeof result === 'object' && !Array.isArray(result) && !op.text && !op.content ? { structuredContent: result } : {};
+    const assistant = profileOfReq(req) === 'assistant';
+    const ctx = {
+      user: req.user, token: req.apiToken ?? null, origin: originOf(req), profile: profileOfReq(req),
+      assistant: req.assistantIdentity ?? null, twoPhase: twoPhaseFor(req), toolName: name,
+      turn: req.get(config.assistant.turnHeader)?.slice(0, 200) || null,
+    };
+    const { result: raw, args } = await invoke(name, params?.arguments ?? {}, ctx);
+    const result = assistant ? fitResponse(raw) : raw;
+    const content = [{ type: 'text', text: textOf(op, result, args, assistant ? config.assistant.maxChars : MAX_TEXT) }, ...(result?.dry_run ? [] : op.content?.(result) ?? [])];
+    const structured = result && typeof result === 'object' && !Array.isArray(result) && (result.dry_run || (!op.text && !op.content)) ? { structuredContent: result } : {};
     return { content, ...structured, isError: false };
   } catch (err) {
     // Erreur d'exécution : renvoyée à l'IA (qui peut corriger son appel), pas en erreur de protocole
@@ -87,6 +114,7 @@ const TEMPLATES = [
 const ctxOf = (req) => ({ user: req.user, token: req.apiToken ?? null, origin: originOf(req) });
 
 async function readResource(req, uri) {
+  if (!req.user) throw unlinkedError(req);
   const m = /^paillasse:\/\/(entries|projects|sequences|samples|templates|datasets)\/([^/?#]+)$/.exec(String(uri ?? ''));
   if (!m) throw Object.assign(new Error(`Adresse de ressource inconnue : ${uri}`), { rpc: -32002 });
   const [, kind, id] = m;
@@ -110,6 +138,7 @@ async function readResource(req, uri) {
 }
 
 async function listResources(req, cursor) {
+  if (!req.user) return { resources: [] };
   const offset = Math.max(0, Number.parseInt(cursor ?? '0', 10) || 0);
   const PAGE = 100;
   const { rows } = await query(
@@ -223,16 +252,18 @@ async function handle(req, msg) {
         protocolVersion: negotiate(params?.protocolVersion),
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } },
         serverInfo: SERVER_INFO,
-        instructions: INSTRUCTIONS,
+        instructions: instructionsFor(req),
       };
     case 'ping': return {};
-    case 'tools/list': return { tools: visibleTools(req).map(toolOf) };
+    case 'tools/list': return { tools: visibleTools(req).map((op) => toolOf(op, profileOfReq(req))) };
     case 'tools/call': return callTool(req, params);
     case 'resources/list': return listResources(req, params?.cursor);
     case 'resources/templates/list': return { resourceTemplates: TEMPLATES };
     case 'resources/read': return { contents: [await readResource(req, params?.uri)] };
     case 'prompts/list': return { prompts: PROMPTS.map(({ build, ...p }) => p) };
-    case 'prompts/get': return getPrompt(req, params);
+    case 'prompts/get':
+      if (!req.user) throw unlinkedError(req);
+      return getPrompt(req, params);
     default: throw Object.assign(new Error(`Méthode inconnue : ${method}`), { rpc: -32601 });
   }
 }

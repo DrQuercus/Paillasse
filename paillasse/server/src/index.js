@@ -28,10 +28,11 @@ import adminRoutes from './routes/admin.js';
 import { ownerBoard, sharedBoard } from './routes/board.js';
 import integrationRoutes from './integrations/routes.js';
 import integrationAdminRoutes from './integrations/admin.js';
-import { openapiRoute, v1 } from './integrations/rest.js';
+import { assistantOpenapiRoute, assistantPromptRoute, openapiRoute, v1 } from './integrations/rest.js';
 import { mcp, mcpParseError } from './integrations/mcp.js';
 import { bridgeRoute, llmsRoute } from './integrations/docs.js';
 import { flushTokenUsage } from './integrations/tokens.js';
+import { flushAssistantUsage } from './integrations/assistant.js';
 import { startWebhookDispatcher } from './integrations/webhooks.js';
 
 installServerLog();
@@ -74,6 +75,9 @@ const scopeByOperation = (req, _res, next) => {
   next();
 };
 app.get('/api/v1/openapi.json', openCors, openapiRoute);
+// Profil de l'assistant IA du labo : sa description OpenAPI et la branche de consigne à ajouter à son prompt
+app.get('/api/v1/assistant/openapi.json', openCors, assistantOpenapiRoute);
+app.get('/api/v1/assistant/prompt', openCors, assistantPromptRoute);
 app.get('/llms.txt', llmsRoute);
 app.get('/integrations/paillasse-mcp.mjs', bridgeRoute);
 app.use('/api/v1', openCors, scopeByOperation, requireAuth, requirePasswordChosen, v1);
@@ -156,7 +160,7 @@ const server = app.listen(config.port, config.host, () => {
 });
 
 const shutdown = () => {
-  server.close(() => flushTokenUsage().finally(() => pool.end()).then(() => process.exit(0)));
+  server.close(() => Promise.allSettled([flushTokenUsage(), flushAssistantUsage()]).finally(() => pool.end()).then(() => process.exit(0)));
   setTimeout(() => process.exit(1), 5000).unref();
 };
 process.on('SIGTERM', shutdown);

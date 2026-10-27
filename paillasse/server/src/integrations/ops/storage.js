@@ -14,7 +14,8 @@ import { compact, isoDate, isoTime, sampleIdOf, sequenceIdOf, webUrl } from './c
 
 const GROUP = 'Stockage';
 const TYPES = Object.keys(SAMPLE_TYPES);
-const typeHelp = Object.entries(SAMPLE_TYPES).map(([k, v]) => `${k} (${v.label})`).join(', ');
+// Types les moins évidents (les autres se lisent d'eux-mêmes dans la liste des valeurs possibles)
+const typeHelp = 'strain = souche en glycérol, dna = ADN (PCR, digestion…), rna = ARN ou ADNc, tissue = tissu, sérum ou lysat, grid = grille cryo-EM';
 const sampleRef = (description = 'Tube : identifiant (uuid) ou code (ECH-0001).') => str(description, { minLength: 1, maxLength: 60 });
 
 const sampleView = (ctx, s) => compact({
@@ -26,6 +27,7 @@ const sampleView = (ctx, s) => compact({
   sequence: s.sequence_id ? { id: s.sequence_id, code: s.sequence_code, name: s.sequence_name } : undefined,
   entry: s.entry_id ? { id: s.entry_id, title: s.entry_title } : undefined,
   notes: s.notes, details: s.details && Object.keys(s.details).length ? s.details : undefined,
+  unit_id: s.unit_id,
   url: webUrl(ctx, `/storage?sample=${s.id}`),
 });
 
@@ -36,12 +38,12 @@ define({
   scope: 'read',
   http: { method: 'GET', path: '/storage' },
   description: 'Appareils et contenants du stockage (congélateurs, réfrigérateurs, cuves d’azote, étagères, racks, tiroirs, boîtes, '
-    + 'sacs, canisters, pucks, boîtes à grilles) avec leur chemin, leur température, le nombre de tubes et la place libre. '
-    + 'Filtres : type de contenant, contenant parent, nom.',
+    + 'sacs, canisters, pucks, boîtes à grilles) avec leur identifiant, leur chemin, leur température, le nombre de tubes et la '
+    + 'place libre. À employer pour trouver une boîte par son nom (avant de ranger un tube) ou voir où il reste de la place.',
   input: params({
     kind: oneOf(Object.keys(UNIT_KINDS), `Type de contenant : ${Object.keys(UNIT_KINDS).join(', ')}.`),
     parent_id: uuid('Seulement les contenants rangés directement dans celui-ci.'),
-    query: str('Mot du nom du contenant.', { maxLength: 100 }),
+    query: str('Mot du nom du contenant, ex. « Boîte A », « -80 ».', { maxLength: 100 }),
     limit: int('Nombre de contenants (1 à 1000).', { minimum: 1, maximum: 1000, default: 300 }),
   }),
   async handler(a) {
@@ -103,13 +105,13 @@ define({
   title: 'Chercher des tubes',
   group: GROUP,
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/samples' },
   description: 'Cherche des tubes rangés (pas les jetés) : par texte (nom, code, notes, concentration, code ou nom de la séquence liée), '
-    + `type, séquence, entrée, contenant, ou statut (out = sorti du froid). Renvoie l’emplacement complet. Types : ${typeHelp}.`,
+    + 'type, séquence, entrée, contenant, ou statut (out = sorti du froid). À employer pour « où est le tube de … ? » ou « que reste-t-il '
+    + 'de … ? ». Renvoie l’emplacement complet.',
   input: params({
-    query: str('Texte cherché.', { maxLength: 200 }),
-    type: oneOf(TYPES, 'Type de tube.'),
+    query: str('Texte cherché, ex. « BL21 pET28-DegU », « ECH-0042 ».', { maxLength: 200 }),
+    type: oneOf(TYPES, `Type de tube (${typeHelp}).`),
     sequence_id: str('Séquence liée : uuid ou code SEQ-0001.', { maxLength: 60 }),
     entry_id: uuid('Entrée liée.'),
     unit_id: uuid('Contenant (boîte, sac).'),
@@ -132,10 +134,9 @@ define({
   title: 'Fiche d’un tube',
   group: GROUP,
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/samples/{sample_id}' },
   description: 'Fiche d’un tube : emplacement complet, contenu, concentration, volume, dates, décongélations, liens (séquence, '
-    + 'entrée, projet) et historique de tous les gestes (rangé, déplacé, sorti, remis…).',
+    + 'entrée, projet) et historique des gestes, du plus récent au plus ancien (rangé, déplacé, sorti, remis…).',
   input: params({ sample_id: sampleRef() }, ['sample_id']),
   async handler(a, ctx) {
     const s = await getSample(ctx.user, await sampleIdOf(a.sample_id));
@@ -149,8 +150,8 @@ define({
   group: GROUP,
   scope: 'read',
   http: { method: 'GET', path: '/storage/alerts' },
-  description: 'À surveiller : tubes sortis du froid depuis trop longtemps, périmés ou bientôt périmés, trop souvent décongelés, '
-    + 'et boîtes presque pleines.',
+  description: 'À surveiller au stockage : tubes sortis du froid depuis trop longtemps, périmés ou bientôt périmés, trop souvent '
+    + 'décongelés, et boîtes presque pleines. À employer pour « qu’est-ce qu’il faut ranger ou vérifier ? ».',
   input: params({}),
   async handler(_a, ctx) {
     const w = await watchList(ctx.user);
@@ -184,7 +185,7 @@ async function positionIn(unitId, label) {
 
 const sampleFields = {
   name: str('Nom du tube (ce qu’il contient).', { maxLength: 200 }),
-  type: oneOf(TYPES, `Type : ${typeHelp}.`),
+  type: oneOf(TYPES, `Type (${typeHelp}).`),
   concentration: str('Concentration (texte libre : « 250 ng/µL »).', { maxLength: 80 }),
   volume: str('Volume (« 50 µL »).', { maxLength: 80 }),
   aliquot: str('Aliquot (« 1/10 »).', { maxLength: 80 }),

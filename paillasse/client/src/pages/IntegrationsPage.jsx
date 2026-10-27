@@ -6,6 +6,7 @@ import TokensCard from '../components/integrations/TokensCard.jsx';
 import ConnectCard from '../components/integrations/ConnectCard.jsx';
 import WebhooksCard from '../components/integrations/WebhooksCard.jsx';
 import ReferenceCard from '../components/integrations/ReferenceCard.jsx';
+import AssistantCard from '../components/integrations/AssistantCard.jsx';
 
 /** Intégrations : ouvrir le cahier à une IA locale, une automatisation, un script, un index de recherche. */
 export default function IntegrationsPage() {
@@ -36,6 +37,7 @@ export default function IntegrationsPage() {
       )}
       {info && (
         <div className="adm-stack">
+          <AssistantCard assistant={info.assistant} />
           <TokensCard enabled={info.enabled} onToken={(t) => setToken(t.token)} />
           <ConnectCard endpoints={info.endpoints} token={token} />
           <WebhooksCard info={info} />

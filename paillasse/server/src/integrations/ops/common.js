@@ -47,6 +47,26 @@ export function compact(obj) {
 export const isoDate = (d) => (d ? (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toLocaleDateString('sv-SE')) : null);
 export const isoTime = (d) => (d ? new Date(d).toISOString() : null);
 
+/**
+ * Découpe un long texte en parties d'au plus size caractères, aux sauts de paragraphe quand c'est possible :
+ * une IA à petite fenêtre de contexte lit une longue entrée partie par partie.
+ */
+export function splitParts(text, size) {
+  const parts = [];
+  let current = '';
+  const push = () => { if (current) parts.push(current); current = ''; };
+  for (const block of String(text ?? '').split(/(?<=\n\n)/)) {
+    if (current && current.length + block.length > size) push();
+    if (block.length > size) {
+      for (let k = 0; k < block.length; k += size) parts.push(block.slice(k, k + size));
+    } else {
+      current += block;
+    }
+  }
+  push();
+  return parts.length ? parts : [''];
+}
+
 /** Pagination : renvoie { items, next_offset } à partir d'une liste lue avec une ligne de plus. */
 export function page(rows, limit, offset) {
   const more = rows.length > limit;

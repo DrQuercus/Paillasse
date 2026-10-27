@@ -10,6 +10,7 @@ import { originOf } from '../lib/markdownExport.js';
 import { SCOPES, newToken } from './tokens.js';
 import { EVENT_GROUPS, EVENT_TYPES, lastEventId } from './events.js';
 import { createWebhook, deliveriesOf, redeliver, rotateSecret, sendTest, updateWebhook, webhookView } from './webhooks.js';
+import { assistantActive, assistantSettings, linkOfUser, linkView, newLinkCode, setLinkScope, unlink } from './assistant.js';
 
 const router = Router();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,6 +30,9 @@ export function endpoints(origin) {
     api: `${origin}/api/v1`,
     openapi: `${origin}/api/v1/openapi.json`,
     mcp: `${origin}/mcp`,
+    assistant_api: `${origin}/api/v1/assistant`,
+    assistant_openapi: `${origin}/api/v1/assistant/openapi.json`,
+    assistant_prompt: `${origin}/api/v1/assistant/prompt`,
     llms: `${origin}/llms.txt`,
     bridge: `${origin}/integrations/paillasse-mcp.mjs`,
     changes: `${origin}/api/v1/changes`,
@@ -48,7 +52,43 @@ router.get('/info', async (req, res) => {
     event_groups: EVENT_GROUPS,
     last_event_id: await lastEventId(),
     via_token: Boolean(req.apiToken),
+    assistant: assistantInfo(),
   });
+});
+
+// --- Assistant IA du labo : liaison de mon compte (session du navigateur seulement) --------------------------
+
+function assistantInfo() {
+  const a = assistantSettings();
+  return {
+    configured: a.configured,
+    active: assistantActive(),
+    name: a.name,
+    url: a.url || null,
+    tool_prefix: a.toolPrefix,
+    max_chars: a.maxChars,
+    modes: { signed_header: Boolean(a.jwtSecret), session: Boolean(a.identityUrl) },
+  };
+}
+
+router.get('/assistant', requireSession, async (req, res) => {
+  res.json({ ...assistantInfo(), link: linkView(await linkOfUser(req.user.id)) });
+});
+
+router.post('/assistant/code', requireSession, async (req, res) => {
+  if (!assistantActive()) throw new HttpError(403, 'L’assistant IA n’est pas branché sur ce cahier, ou l’administrateur l’a désactivé.');
+  res.status(201).json(await newLinkCode(req.user));
+});
+
+router.patch('/assistant', requireSession, async (req, res) => {
+  if (!['read', 'write'].includes(req.body?.scope)) throw new HttpError(400, 'Droits : read (lecture seule) ou write (lecture et écriture).');
+  await setLinkScope(req.user, req.body.scope);
+  res.json(linkView(await linkOfUser(req.user.id)));
+});
+
+router.delete('/assistant', requireSession, async (req, res) => {
+  await unlink(req.user.id, req.user);
+  res.json({ ok: true });
 });
 
 // --- Jetons d'accès (session du navigateur seulement) ------------------------------------------------------

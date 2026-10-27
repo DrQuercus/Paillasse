@@ -3,11 +3,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { query } from '../../db.js';
+import { inDryRun, query } from '../../db.js';
 import { config } from '../../config.js';
 import { assertEntry, assertProject, visibleProjects } from '../../lib/access.js';
 import { docToPlainText } from '../../lib/doc.js';
 import { HttpError, notFound } from '../../lib/errors.js';
+import { docToMarkdown } from '../../lib/markdown.js';
 import { markdownToBlocks } from '../../lib/markdownIn.js';
 import { markdownOnServer } from '../../lib/markdownExport.js';
 import { blobPath, tmpDir } from '../../lib/storage.js';
@@ -19,11 +20,23 @@ import { addAttachment } from '../../routes/attachments.js';
 import { emit, projectAudience } from '../events.js';
 import { define } from '../registry.js';
 import { bool, date, int, oneOf, params, str, uuid } from '../schema.js';
-import { compact, isoDate, isoTime, page, webUrl } from './common.js';
+import { compact, isoDate, isoTime, page, splitParts, webUrl } from './common.js';
 
 const GROUP = 'Entrées';
 const MAX_MARKDOWN = 200_000;
 const markdownParam = (description) => str(description, { maxLength: MAX_MARKDOWN, trim: false });
+
+/** Aperçu d'un essai à sec : le contenu de l'entrée tel qu'il sera enregistré (sans les propriétés YAML). */
+async function bodyPreview(entryId, ctx, max = 3000) {
+  const entry = await loadEntry(entryId, ctx.user);
+  const md = markdownOnServer({ entry, project: { name: entry.project_name }, attachments: [], origin: ctx.origin ?? '' })
+    .replace(/^---\n[\s\S]*?\n---\n+/, '');
+  return md.length > max ? `${md.slice(0, max)} […]` : md;
+}
+const addedPreview = (markdown, max = 3000) => {
+  const md = docToMarkdown({ type: 'doc', content: markdownToBlocks(markdown ?? '') });
+  return md.length > max ? `${md.slice(0, max)} […]` : md;
+};
 
 const entryCard = (ctx, e) => compact({
   id: e.id,
@@ -49,17 +62,16 @@ define({
   title: 'Lister les entrées',
   group: GROUP,
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/entries' },
-  description: 'Liste les entrées du cahier (projets visibles), de la plus récente à la plus ancienne. Filtres : projet, statut '
-    + '(draft = brouillon, locked = verrouillée/signée), période (dates d’expérience), mot du titre ou du texte. '
-    + 'Renvoie identifiant, titre, date, projet, auteur et un extrait ; lire une entrée avec get_entry.',
+  description: 'Liste les entrées du cahier (projets visibles), de la plus récente à la plus ancienne, pour parcourir les manips '
+    + 'd’un projet ou d’une période. Filtres : projet, statut (draft = brouillon, locked = verrouillée/signée), dates d’expérience, '
+    + 'mot du titre ou du texte. Renvoie identifiant, titre, date, projet, auteur et un extrait ; lire une entrée avec get_entry.',
   input: params({
     project_id: uuid('Projet (voir list_projects). Sans : tous les projets visibles.'),
     status: oneOf(['draft', 'locked'], 'draft (brouillon) ou locked (verrouillée).'),
-    since: date('Date d’expérience minimale (AAAA-MM-JJ).'),
+    since: date('Date d’expérience minimale (AAAA-MM-JJ), ex. 2026-10-01.'),
     until: date('Date d’expérience maximale (AAAA-MM-JJ).'),
-    query: str('Mot ou expression cherchés dans le titre et le texte (pour une recherche classée par pertinence : search).', { maxLength: 200 }),
+    query: str('Mot ou expression cherchés dans le titre et le texte, ex. « Ni-NTA » (pour une recherche classée par pertinence : search).', { maxLength: 200 }),
     include_archived: bool('Inclure les brouillons archivés.', { default: false }),
     limit: int('Nombre d’entrées (1 à 100).', { minimum: 1, maximum: 100, default: 25 }),
     offset: int('Décalage pour la page suivante.', { minimum: 0, default: 0 }),
@@ -100,15 +112,17 @@ define({
   title: 'Lire une entrée',
   group: GROUP,
   scope: 'read',
-  essential: true,
   http: { method: 'GET', path: '/entries/{entry_id}' },
   description: 'Lit une entrée : propriétés (titre, date, projet, auteur, statut, versions) et contenu en Markdown (tableaux, '
     + 'calculs, figures de gel, résultats statistiques et tubes cités compris), ou en texte brut, ou en JSON de l’éditeur. '
-    + 'version : numéro d’une version figée, ou « last » ; sans : la copie de travail.',
+    + 'À employer pour résumer, citer ou vérifier une manip. version : numéro d’une version figée, ou « last » ; sans : la copie '
+    + 'de travail. Une longue entrée peut venir en plusieurs parties (part, parts).',
   input: params({
     entry_id: uuid('Identifiant de l’entrée.'),
     version: str('Numéro de version figée, ou « last » (dernière). Sans : copie de travail.', { pattern: '^(\\d{1,6}|last)$', patternHint: 'un numéro ou « last ».' }),
     format: oneOf(['markdown', 'text', 'json'], 'markdown (par défaut), text (texte brut) ou json (document de l’éditeur).', { default: 'markdown' }),
+    part: int('Partie du contenu à lire (1 pour la première), quand l’entrée est longue.', { minimum: 1, default: 1 }),
+    part_chars: int('Taille d’une partie en caractères (1 000 à 200 000) ; sans : tout le contenu d’un coup.', { minimum: 1000, maximum: 200_000 }),
   }, ['entry_id']),
   async handler(a, ctx) {
     await assertEntry(ctx.user, a.entry_id);
@@ -132,16 +146,27 @@ define({
       version: version ? { number: version.version_number, kind: version.kind, note: version.note, created_at: isoTime(version.created_at), author: version.author, hash: version.hash } : undefined,
       attachments: attachments.map((f) => fileCard(ctx, f)),
     };
-    if (a.format === 'json') out.content = source.content;
-    else if (a.format === 'text') out.text = docToPlainText(source.content);
-    else {
-      out.markdown = markdownOnServer({
-        entry, project: { name: entry.project_name }, version, author: version?.author, attachments, origin: ctx.origin ?? '',
-      });
+    if (a.format === 'json') return compact({ ...out, content: source.content });
+    const field = a.format === 'text' ? 'text' : 'markdown';
+    const body = a.format === 'text' ? docToPlainText(source.content) : markdownOnServer({
+      entry, project: { name: entry.project_name }, version, author: version?.author, attachments, origin: ctx.origin ?? '',
+    });
+    // Longue entrée, lue par parties (part_chars) : la partie demandée, et comment lire la suivante
+    if (a.part_chars && body.length > a.part_chars) {
+      const parts = splitParts(body, a.part_chars);
+      const n = Math.min(a.part, parts.length);
+      out[field] = parts[n - 1];
+      out.part = n;
+      out.parts = parts.length;
+      if (n < parts.length) out.next = `Suite : même entrée avec part = ${n + 1} (sur ${parts.length}).`;
+    } else {
+      out[field] = body;
     }
     return compact(out);
   },
-  text: (r) => (r.markdown ? `${r.markdown}\n\n(identifiant : ${r.id} ; statut : ${r.status} ; adresse : ${r.url})` : null),
+  text: (r) => (r.markdown
+    ? `${r.markdown}\n\n(identifiant : ${r.id} ; statut : ${r.status} ; adresse : ${r.url}${r.parts ? ` ; partie ${r.part} sur ${r.parts}${r.next ? ` ; ${r.next}` : ''}` : ''})`
+    : null),
 });
 
 define({
@@ -246,19 +271,19 @@ define({
 
 // --- Écriture ------------------------------------------------------------------------------------------------
 
-const markdownHelp = 'Markdown : titres (#), **gras**, *italique*, listes (- ou 1.), cases à cocher (- [ ] / - [x]), tableaux | a | b |, '
-  + 'citations (>), blocs de code (```), liens [texte](https://…), images ![légende](/api/files/<id> d’un fichier joint).';
+const markdownHelp = 'Markdown : titres #, **gras**, *italique*, listes, cases - [ ], tableaux | a | b |, citations >, code ```, liens, '
+  + 'images ![légende](/api/files/<id>).';
 
 define({
   name: 'create_entry',
   title: 'Créer une entrée',
   group: GROUP,
   scope: 'write',
-  essential: true,
   http: { method: 'POST', path: '/entries' },
   annotations: { destructiveHint: false, idempotentHint: false },
   description: `Crée une entrée (brouillon) dans un projet, vide, depuis un modèle (template_id, voir list_templates) et/ou avec un `
-    + `contenu en Markdown ajouté à la fin. ${markdownHelp} Renvoie l’identifiant et l’adresse de l’entrée.`,
+    + `contenu en Markdown ajouté à la fin. À employer quand la personne demande de noter une manip ou de préparer une entrée. `
+    + `${markdownHelp} Renvoie l’identifiant et l’adresse de l’entrée.`,
   input: params({
     project_id: uuid('Projet où ranger l’entrée (list_projects).'),
     title: str('Titre de l’entrée.', { minLength: 1, maxLength: 500 }),
@@ -272,6 +297,7 @@ define({
     const e = await loadEntry(id, ctx.user);
     return compact({ id, title: e.title, date: isoDate(e.entry_date), project: { id: e.project_id, name: e.project_name }, status: e.status, revision: e.revision, url: webUrl(ctx, `/entries/${id}`) });
   },
+  preview: async (_a, ctx, r) => ({ ...r, content_preview: await bodyPreview(r.id, ctx) }),
 });
 
 define({
@@ -279,7 +305,6 @@ define({
   title: 'Compléter une entrée',
   group: GROUP,
   scope: 'write',
-  essential: true,
   http: { method: 'POST', path: '/entries/{entry_id}/append' },
   annotations: { destructiveHint: false, idempotentHint: false },
   description: `Ajoute du contenu en Markdown à la fin d’un brouillon (le reste n’est pas touché : encarts, figures, tableaux). `
@@ -296,6 +321,7 @@ define({
     });
     return { entry_id: a.entry_id, appended_blocks: blocks.length, revision: r.revision, updated_at: isoTime(r.updated_at), url: webUrl(ctx, `/entries/${a.entry_id}`) };
   },
+  preview: (a, _ctx, r) => ({ ...r, added_markdown: addedPreview(a.content_markdown) }),
 });
 
 define({
@@ -359,6 +385,7 @@ define({
   scope: 'write',
   http: { method: 'POST', path: '/entries/{entry_id}/lock' },
   annotations: { destructiveHint: true, idempotentHint: false },
+  humanOnly: true,
   description: 'IRRÉVERSIBLE : fige une dernière version et verrouille l’entrée, qui ne pourra plus jamais être modifiée '
     + '(seulement complétée par des addenda). Ne le faire que si l’utilisateur l’a demandé explicitement ; confirm doit valoir true.',
   input: params({
@@ -392,6 +419,7 @@ define({
     const e = await loadEntry(id, ctx.user);
     return { id, title: e.title, date: isoDate(e.entry_date), addendum_of: a.entry_id, url: webUrl(ctx, `/entries/${id}`) };
   },
+  preview: async (_a, ctx, r) => ({ ...r, content_preview: await bodyPreview(r.id, ctx) }),
 });
 
 const MIME_BY_EXT = {
@@ -431,6 +459,13 @@ define({
     const filename = path.basename(a.filename.replace(/\\/g, '/')).replace(/[\u0000-\u001f]/g, '') || 'fichier';
     const ext = /\.([^.]+)$/.exec(filename)?.[1]?.toLowerCase();
     const mimetype = a.mime_type || MIME_BY_EXT[ext] || (a.content_text !== undefined ? 'text/plain' : 'application/octet-stream');
+    if (inDryRun()) {
+      // Essai à sec : les vérifications, sans rien écrire sur le disque
+      await assertEntry(ctx.user, a.entry_id, { write: true });
+      const { rows: [e] } = await query('SELECT status FROM entries WHERE id = $1', [a.entry_id]);
+      if (e?.status === 'locked') throw new HttpError(409, 'Entrée verrouillée : ajoutez le fichier dans un addendum.');
+      return { filename, mime_type: mimetype, size_bytes: data.length, entry_id: a.entry_id, inserted: Boolean(a.insert) };
+    }
     const tmp = path.join(tmpDir, `api-${crypto.randomUUID()}`);
     await fs.promises.writeFile(tmp, data);
     const att = await addAttachment(ctx.user, a.entry_id, { path: tmp, filename, mimetype, size: data.length });

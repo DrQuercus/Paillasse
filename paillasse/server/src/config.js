@@ -20,4 +20,19 @@ export const config = {
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 500),
   clientDist: path.resolve(serverRoot, '../client/dist'),
   migrationsDir: path.join(serverRoot, 'migrations'),
+  // Assistant IA du labo (Open WebUI ou compatible) qui appelle Paillasse au nom de la personne qui lui parle.
+  // Rien n'est actif sans ASSISTANT_JWT_SECRET ou ASSISTANT_IDENTITY_URL (voir server/.env.example).
+  assistant: {
+    name: (process.env.ASSISTANT_NAME || '').trim() || 'l’assistant IA',
+    url: (process.env.ASSISTANT_URL || '').trim().replace(/\/+$/, ''),
+    jwtSecret: (process.env.ASSISTANT_JWT_SECRET || '').trim(),
+    jwtHeader: (process.env.ASSISTANT_JWT_HEADER || '').trim() || 'X-OpenWebUI-User-Jwt',
+    // Identifiant du message en cours, joint par l'assistant à chaque appel d'outil (Open WebUI, en-têtes transmis)
+    turnHeader: (process.env.ASSISTANT_TURN_HEADER || '').trim() || 'X-OpenWebUI-Message-Id',
+    identityUrl: (process.env.ASSISTANT_IDENTITY_URL || '').trim(),
+    tools: (process.env.ASSISTANT_TOOLS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    // (vide : paillasse_ ; « aucun » : pas de préfixe)
+    toolPrefix: ((p) => (/^(aucun|none)$/i.test(p) ? '' : p || 'paillasse_'))((process.env.ASSISTANT_TOOL_PREFIX || '').trim()),
+    maxChars: Math.max(2000, Number(process.env.ASSISTANT_MAX_CHARS) || 6000),
+  },
 };

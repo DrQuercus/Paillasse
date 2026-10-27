@@ -4,8 +4,8 @@ import { query } from '../db.js';
 const cache = new Map();
 const DEFAULTS = {
   maintenance: { on: false, message: '' },
-  // Ouverture aux autres outils : jetons d'accès (API, MCP) et webhooks sortants
-  integrations: { enabled: true, webhooks: true },
+  // Ouverture aux autres outils : jetons d'accès (API, MCP), webhooks sortants, assistant IA du labo
+  integrations: { enabled: true, webhooks: true, assistant: true },
 };
 
 export async function loadSettings() {

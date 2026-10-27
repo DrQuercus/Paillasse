@@ -436,8 +436,9 @@ journal d'administration.
 sans état, avec le jeton en Bearer. L'IA y trouve les outils, des ressources lisibles par adresse
 (`paillasse://entries/{id}`, `…/sequences/SEQ-0001`, `…/samples/ECH-0001`, projets, modèles, jeux de données) et des
 consignes prêtes à l'emploi (résumer une entrée, bilan d'un projet sur une période, préparer une manip, retrouver un
-échantillon, rédiger la conclusion d'une entrée). Pour un petit modèle local, `…/mcp?profile=essential` ne propose
-qu'une douzaine d'outils ; `?tools=search,get_entry` une liste choisie. La page Intégrations donne la configuration
+échantillon, rédiger la conclusion d'une entrée). Pour un petit modèle local, `…/mcp?profile=assistant` ne propose
+que les outils choisis pour une IA de labo (voir *Assistant du labo* plus bas) ; `?tools=search,get_entry` une liste
+choisie. La page Intégrations donne la configuration
 prête à copier pour Open WebUI, LM Studio, AnythingLLM et n8n. Pour les clients qui ne lancent que des programmes
 locaux (Claude Desktop, Jan, Cline…), le **pont** `server/scripts/paillasse-mcp.mjs` (aussi téléchargeable depuis la
 page, un seul fichier, Node.js 18 ou plus, sans dépendance) relaie l'entrée standard vers `/mcp` :
@@ -487,6 +488,96 @@ contient qu'un type, un titre, un code et des adresses : l'outil relit le détai
 
 Derrière nginx : rien de particulier pour `/mcp` (réponses JSON, pas de flux), mais `client_max_body_size 40m;` si
 des outils joignent des fichiers par l'API (20 Mo de fichier en base64 font 27 Mo de JSON).
+
+### Assistant du labo : l'IA en chef d'orchestre
+
+Un assistant IA du labo (Open WebUI ou compatible, sur un modèle local) peut se servir de Paillasse **au nom de la
+personne qui lui parle**, avec les droits de son compte, sans que chacun ait à créer un jeton. Paillasse devient l'un
+de ses serveurs d'outils, à côté des autres (base de connaissance, bibliothèque d'articles, terminal…) : l'assistant
+orchestre, il cherche dans le cahier, croise avec ses autres sources, prépare une entrée ou range des tubes, et
+Paillasse garde la main sur ce qui s'écrit (droits, aperçu, confirmation, journal).
+
+**Qui parle ?** L'assistant le dit à Paillasse de l'une de ces deux façons, ou des deux. Rien d'autre n'est cru,
+en particulier pas les en-têtes non signés `X-OpenWebUI-User-*`.
+
+1. *En-tête signé* : Open WebUI lancé avec `ENABLE_FORWARD_USER_INFO_HEADERS=true` et
+   `FORWARD_USER_INFO_HEADER_JWT_SECRET=<secret>` joint à chaque appel d'outil un jeton HS256 (en-tête
+   `X-OpenWebUI-User-Jwt` : identifiant, adresse, nom et rôle de la personne, valable 5 minutes), que Paillasse
+   vérifie avec le même secret (`ASSISTANT_JWT_SECRET`). C'est le mode conseillé : les en-têtes transmis portent aussi
+   l'identifiant du message en cours, qui protège les écritures (plus bas). Si la version d'Open WebUI ne connaît
+   pas cette variable : la session.
+2. *Session* : le serveur d'outils est déclaré avec l'authentification « Session » ; Open WebUI transmet la session
+   de la personne (`Authorization: Bearer …`), que Paillasse fait confirmer par l'assistant
+   (`ASSISTANT_IDENTITY_URL`, pour Open WebUI `http://<assistant>/api/v1/auths/`). Paillasse n'envoie cette session
+   qu'à cette adresse et n'en garde qu'une empreinte, une minute.
+
+Un compte « en attente » chez l'assistant est refusé ; le mode maintenance et l'interrupteur des intégrations
+s'appliquent comme aux jetons.
+
+**Relier son compte, une fois.** Page **Intégrations › Assistant** : « Obtenir un code de liaison » donne un code de
+8 caractères (valable 10 minutes, une fois), à dire à l'assistant (« Relie mon compte Paillasse avec le code
+7KQ2-M9XD ») ; la page voit la liaison d'elle-même. La liaison associe l'identifiant du compte chez l'assistant (pas
+son adresse : rien n'est deviné) au compte Paillasse ; 10 essais au plus en 10 minutes. Chacun choisit ce que
+l'assistant peut faire en son nom, *lecture seule* (par défaut) ou *lecture et écriture*, et peut délier à tout
+moment ; jamais de droits d'administration. L'administrateur voit les comptes reliés, peut en délier et peut couper
+l'accès par l'assistant d'un clic (**Maintenance › Intégrations**) ; liaisons et changements de droits vont au
+journal d'administration.
+
+**Ce que voit le modèle.** `https://<serveur>/api/v1/assistant` (description publique : `…/assistant/openapi.json`)
+et, en MCP, `…/mcp?profile=assistant` : 26 outils choisis pour un petit modèle (chercher, activité récente, projets,
+entrées, protocoles, séquences en lecture, stockage, jeux de données ; créer une entrée, la compléter, ajouter un
+addendum ; ranger, déplacer, sortir, remettre ou jeter un tube, l'annoter ; relier son compte). Leurs noms sont préfixés
+(`paillasse_search`…) pour ne pas se mêler aux outils des autres serveurs ; chaque description dit en français ce
+que fait l'outil, quand l'employer et ce qu'il rend, avec des exemples de paramètres. Réponses courtes : 10 éléments
+par défaut, réponse coupée au-delà de 6 000 caractères avec une note `truncated` qui dit comment obtenir la suite,
+longue entrée lue en parties (`part`). Les descriptions d'outils pèsent environ 7 000 jetons, que le modèle porte à
+chaque message (chiffre exact dans Maintenance › Intégrations) : pour une petite fenêtre de contexte,
+`ASSISTANT_TOOLS` réduit la liste (la lecture seule pour commencer, par exemple), tout comme le filtre de fonctions
+d'Open WebUI.
+
+**Écritures protégées par le code, pas par une consigne.** Toute écriture de l'assistant se fait en deux temps. Le
+premier appel est un essai à sec : l'opération va jusqu'au bout dans une transaction, puis tout est annulé, et la
+réponse montre un aperçu et un code de confirmation. L'écriture n'a lieu qu'au second appel, avec ce code, qui ne
+vaut que pour cette personne, cette opération et exactement ces paramètres (15 minutes, une fois). Quand Open WebUI
+transmet ses en-têtes (`ENABLE_FORWARD_USER_INFO_HEADERS=true`), chaque appel porte l'identifiant du message en cours
+(`X-OpenWebUI-Message-Id`) : le code n'est alors accepté que dans un message suivant, donc après une réponse de la
+personne, et le modèle ne peut pas enchaîner seul l'aperçu et l'enregistrement. Sans cet en-tête, le code garantit
+que ce qui s'écrit est exactement ce qui a été montré, pas qu'une personne a dit oui. Le verrouillage d'une entrée,
+irréversible, est refusé à l'assistant par tous les chemins (API complète et MCP compris) ; son profil ne contient
+ni suppression, ni pièce jointe, ni création de séquence. Un texte qui contient ce qui
+ressemble à une séquence (20 nucléotides ou 30 acides aminés d'affilée, ou des blocs comme dans GenBank) est refusé :
+une séquence entre dans le registre par un fichier, NCBI ou UniProt, jamais recopiée par un modèle, et l'assistant
+la cite par son code SEQ-…. Ce qui est écrit est signé du nom de la personne (versions, journal, événements). Les
+erreurs disent quoi faire (compte pas relié : comment le relier ; lecture seule : où ouvrir l'écriture). Pour les
+scripts, toute opération d'écriture de l'API complète accepte aussi `dry_run: true`.
+
+**Consigne.** Sans une branche dans son prompt système, un petit modèle répond de mémoire au lieu d'appeler les
+outils : `…/api/v1/assistant/prompt` donne cette branche en français (aussi dans Maintenance › Intégrations, à
+copier), à adapter avec l'administrateur de l'assistant.
+
+**Brancher l'assistant.**
+
+1. Dans `server/.env` : `ASSISTANT_NAME`, `ASSISTANT_URL`, puis `ASSISTANT_JWT_SECRET` et/ou
+   `ASSISTANT_IDENTITY_URL` (détail dans `.env.example`), et redémarrer. Un secret se génère avec
+   `openssl rand -hex 32` et ne se versionne jamais.
+2. Chez l'assistant (par son administrateur) : un serveur d'outils de type OpenAPI, adresse
+   `http://<Paillasse vu depuis l'assistant>/api/v1/assistant`, chemin `openapi.json`, authentification « Session »
+   (ou « Aucune » si seul l'en-tête signé sert), ouvert aux comptes concernés et ajouté au modèle ; plus la branche
+   de consigne. Maintenance › Intégrations récapitule ces valeurs.
+3. Vérifier : bouton « Vérifier la liaison » (Paillasse joint l'assistant), puis avec un compte **non
+   administrateur** chez l'assistant, car un outil sans droit d'accès y disparaît en silence alors qu'il marche pour
+   l'administrateur : « qui suis-je pour Paillasse ? », liaison par code, une recherche, puis une écriture (aperçu,
+   accord, enregistrement).
+
+Réseau : Paillasse doit être joignable depuis l'assistant, souvent dans un conteneur (sur la même machine, par la
+passerelle Docker, en général `http://172.17.0.1:3070`), et doit joindre `ASSISTANT_IDENTITY_URL`. Pour
+l'assistant, Paillasse n'appelle que cette adresse (webhooks et sauvegardes ne vont que là où on les envoie) : rien
+ne sort du réseau du labo sans qu'on l'ait réglé.
+
+Base de connaissance : pour que l'assistant retrouve aussi le cahier par sa recherche documentaire, un petit service
+de synchronisation lit `/api/v1/documents` puis `/api/v1/changes` (réveillé au besoin par un webhook) et dépose par
+l'API de la base, jamais en écrivant dans ses fichiers. Son jeton appartient à un compte dédié, membre des seuls
+projets à verser : tout ce que ce compte voit devient lisible par quiconque interroge la base.
 
 ## Développement
 
@@ -613,6 +704,7 @@ server/
                                journal inviolable, comptes supprimés
   migrations/016_integrations.sql  jetons d'accès, événements (et suppressions notées par la base), webhooks
                                et journal de leurs envois
+  migrations/017_assistant.sql  comptes reliés à l'assistant du labo (identité chez lui, droits, code de liaison)
   src/index.js                 point d'entrée Express, sert aussi client/dist
   src/lib/versions.js          versions figées, chaîne d'empreintes, vérification
   src/lib/storage.js           stockage des fichiers par SHA-256
@@ -634,7 +726,9 @@ server/
                                opérations, par domaine), schema.js (validation des paramètres), rest.js (API v1),
                                openapi.js, mcp.js (serveur MCP), docs.js (llms.txt), tokens.js (jetons, débit),
                                events.js (événements, ordre de validation), webhooks.js (envois signés, relances),
-                               documents.js (export pour un index), routes.js (page Intégrations), admin.js
+                               documents.js (export pour un index), routes.js (page Intégrations), admin.js,
+                               assistant.js (assistant du labo : identité déléguée, liaison, écriture en deux
+                               temps, réponses courtes, consigne)
   src/lib/template-library.json  modèles de base (généré par npm --prefix client run templates)
   src/routes/                  auth, projets, entrées, fichiers, modèles, recherche, export, produits, marqueurs,
                                jeux de données statistiques, stockage (inventory)
@@ -662,7 +756,8 @@ client/
   src/pages/StoragePage.jsx    page Stockage
   src/components/Sharing.jsx   partage : choix des comptes, dialogue « Partager », invitations reçues
   src/pages/MaintenancePage.jsx  page Maintenance ; src/components/admin/ : un onglet par fichier
-  src/pages/IntegrationsPage.jsx  page Intégrations ; src/components/integrations/ : jetons, outils, webhooks, référence
+  src/pages/IntegrationsPage.jsx  page Intégrations ; src/components/integrations/ : assistant, jetons, outils,
+                               webhooks, référence
 deploy/                        service systemd, sauvegarde et son timer
 ```
 
@@ -680,6 +775,11 @@ deploy/                        service systemd, sauvegarde et son timer
 - Une nouvelle fonction utile à un outil extérieur s'ajoute au registre (`server/src/integrations/ops/`, logique
   partagée avec la route de l'interface) : elle apparaît d'un coup dans l'API REST, l'OpenAPI, le serveur MCP et
   `llms.txt`. Un geste qui change le cahier note un événement (`emit`, dans sa transaction s'il en a une).
+- Une IA n'écrit dans le cahier que sous le contrôle du code, jamais d'une consigne : écriture en deux temps pour
+  l'assistant (aperçu par essai à sec, puis code de confirmation lié aux paramètres), aucune séquence recopiée par
+  un modèle, jamais de droits d'administration. Un outil ne rejoint la sélection de l'assistant
+  (`ASSISTANT_DEFAULT_TOOLS`, `server/src/integrations/assistant.js`) que si sa réponse reste courte et que sa
+  description dit, en français, quand l'employer et ce qu'il rend.
 
 ## Limites connues de la v0.1
 
@@ -699,6 +799,10 @@ deploy/                        service systemd, sauvegarde et son timer
   stdio), pas de flux d'événements poussé par le serveur MCP (l'IA demande, Paillasse répond ; pour être prévenu :
   webhooks), pas de création de contenants du stockage ni de jeux de données modifiés par l'API (ils se créent, ou
   se rangent pour les tubes ; le reste se fait dans l'interface).
+- Assistant du labo : éprouvé contre une simulation d'Open WebUI (en-tête signé, session, appels d'outils en
+  OpenAPI et en MCP), pas encore contre une installation réelle. Les codes de confirmation et les limites de débit
+  sont gardés en mémoire : un redémarrage les oublie (l'assistant redemande un aperçu), et Paillasse doit tourner en
+  un seul processus.
 - Éditeur de séquences : interface d'OVE en anglais ; pas encore de clonage in silico ni d'alignement
   de lectures Sanger (prévus ensuite). Digestion : sensibilité à la méthylation (dam/dcm) non signalée.
 - PCR virtuelle : pas de simulation des structures secondaires de la matrice ni des produits parasites

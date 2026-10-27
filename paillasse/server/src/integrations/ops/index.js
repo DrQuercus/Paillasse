@@ -4,3 +4,4 @@ import './entries.js';
 import './sequences.js';
 import './storage.js';
 import './library.js';
+import './assistant.js';

@@ -12,13 +12,13 @@ const TOOLS = [
     label: 'Open WebUI',
     render: (e, token) => (
       <>
-        <p>Interface d’IA locale (avec Ollama, par exemple). Dans les réglages d’administration, rubrique des outils externes,
-          ajoutez un serveur <strong>MCP (HTTP « streamable »)</strong> :</p>
-        <Address label="Adresse" value={e.mcp} />
+        <p>Interface d’IA locale (avec Ollama, par exemple). Pour vous seul : dans ses réglages, rubrique des outils, ajoutez un
+          serveur d’outils <strong>OpenAPI</strong> avec votre jeton. Si l’IA est celle de tout le labo, son administrateur la déclare
+          une fois pour tous, et chacun relie son compte (carte « Assistant »).</p>
+        <Address label="Adresse (OpenAPI)" value={e.assistant_api} hint="Chemin de la description : openapi.json. Outils choisis pour une IA de labo, réponses courtes, écriture en deux temps." />
         <Address label="Authentification" value={`Bearer ${token}`} hint="Type Bearer : la clé est le jeton." />
-        <p>Autre possibilité : un serveur d’outils <strong>OpenAPI</strong>, à l’adresse <code>{e.api}</code> (même jeton).
-          Pour un petit modèle (7 à 8 milliards de paramètres), préférez l’adresse MCP réduite à l’essentiel :</p>
-        <Address label="Adresse MCP réduite" value={`${e.mcp}?profile=essential`} hint="Une douzaine d’outils : chercher, lire et créer des entrées, séquences, tubes." />
+        <p>Ou en <strong>MCP</strong> (HTTP « streamable »), avec le même jeton :</p>
+        <Address label="Adresse MCP" value={`${e.mcp}?profile=assistant`} hint="Sans ?profile=assistant : les 44 outils, pour un grand modèle." />
         <p className="small muted">Pour que l’IA cite tout le cahier dans ses réponses (connaissances, RAG), voyez aussi « Index de recherche ».</p>
       </>
     ),
@@ -54,7 +54,7 @@ const TOOLS = [
         <p><a className="btn" href={e.bridge} download><Download size={15} /> Télécharger paillasse-mcp.mjs</a></p>
         <Snippet title="Configuration du client (claude_desktop_config.json, mcp.json…)" text={json({ mcpServers: { paillasse: { command: 'node', args: ['/chemin/vers/paillasse-mcp.mjs'], env: { PAILLASSE_URL: e.origin, PAILLASSE_TOKEN: token } } } })} />
         <Snippet title="Vérifier l’adresse et le jeton" text={`PAILLASSE_URL=${e.origin} PAILLASSE_TOKEN=${token} node paillasse-mcp.mjs --check`} />
-        <p className="small muted">Variables facultatives : <code>PAILLASSE_PROFILE=essential</code> (moins d’outils), <code>PAILLASSE_TOOLS=search,get_entry</code> (liste choisie).
+        <p className="small muted">Variables facultatives : <code>PAILLASSE_PROFILE=assistant</code> (outils choisis, réponses courtes), <code>PAILLASSE_TOOLS=search,get_entry</code> (liste choisie).
           Certificat d’une autorité interne : <code>NODE_EXTRA_CA_CERTS=/chemin/ca.pem</code>.</p>
       </>
     ),

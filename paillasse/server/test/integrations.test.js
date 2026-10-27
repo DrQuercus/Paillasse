@@ -1,12 +1,13 @@
 // Intégrations (API v1, MCP, webhooks) : validation des paramètres, signatures, jetons, description OpenAPI,
 // protocole MCP, llms.txt. La dernière partie (événements de suppression, visibilité) passe par PostgreSQL, dans
 // une transaction annulée à la fin ; elle est ignorée si la base ne répond pas.
+import crypto from 'node:crypto';
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import pg from 'pg';
 import { config } from '../src/config.js';
-import { pool } from '../src/db.js';
+import { dryRun, inDryRun, pool, query } from '../src/db.js';
 import { validate, params, str, int, num, bool, list, uuid, date, oneOf, publicSchema } from '../src/integrations/schema.js';
 import { signPayload, verifySignature, newSecret } from '../src/integrations/webhooks.js';
 import { hashToken, looksLikeToken, newToken, rateLimit } from '../src/integrations/tokens.js';
@@ -14,6 +15,8 @@ import { getOperation, invoke, listOperations } from '../src/integrations/regist
 import { openapiDocument, pathParams } from '../src/integrations/openapi.js';
 import { llmsText } from '../src/integrations/docs.js';
 import { mcp, mcpParseError, PROTOCOL_VERSIONS } from '../src/integrations/mcp.js';
+import { checkConfirmation, fitResponse, issueConfirmation, sequenceIn, verifyIdentityJwt } from '../src/integrations/assistant.js';
+import { splitParts } from '../src/integrations/ops/common.js';
 import { EVENT_TYPES, typeMatches, visibleEvent } from '../src/integrations/events.js';
 
 after(() => pool.end());
@@ -116,7 +119,9 @@ test('registre : chaque opération est complète et cohérente', () => {
     }
   }
   assert.equal(listOperations({ scope: 'read' }).length, 29, 'jeton de lecture : pas d’écriture');
-  assert.equal(listOperations({ profile: 'essential' }).length, 12);
+  assert.equal(listOperations({ profile: 'assistant' }).length, 26, 'sélection de l’assistant');
+  assert.equal(listOperations({ profile: 'essential' }).length, 26, 'ancien nom du même profil');
+  assert.ok(!listOperations().some((op) => op.name === 'link_account'), 'la liaison n’apparaît que pour l’assistant');
   assert.deepEqual(listOperations({ only: ['search', 'get_entry'] }).map((o) => o.name), ['search', 'get_entry']);
   assert.equal(getOperation('lock_entry').annotations.destructiveHint, true);
 });
@@ -312,4 +317,122 @@ test('suppressions : notées avec leur audience, écrites à la validation', { s
     await c.query('ROLLBACK');
     c.release();
   }
+});
+
+// --- Assistant IA du labo --------------------------------------------------------------------------------------
+
+const signJwt = (payload, secret, header = { alg: 'HS256', typ: 'JWT' }) => {
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const body = `${enc(header)}.${enc(payload)}`;
+  return `${body}.${crypto.createHmac('sha256', secret).update(body).digest('base64url')}`;
+};
+
+test('assistant : identité signée (HS256, comme X-OpenWebUI-User-Jwt)', () => {
+  const now = 1_800_000_000_000;
+  const p = { sub: 'u-1', email: 'a@labo.fr', name: 'A', role: 'user', iss: 'open-webui', iat: now / 1000, exp: now / 1000 + 300 };
+  assert.deepEqual(verifyIdentityJwt(signJwt(p, 'secret'), 'secret', now), { subject: 'u-1', email: 'a@labo.fr', name: 'A', role: 'user' });
+  assert.equal(verifyIdentityJwt(signJwt(p, 'autre'), 'secret', now), null, 'mauvais secret');
+  assert.equal(verifyIdentityJwt(signJwt({ ...p, exp: now / 1000 - 120 }, 'secret'), 'secret', now), null, 'expiré');
+  assert.notEqual(verifyIdentityJwt(signJwt({ ...p, exp: now / 1000 - 30 }, 'secret'), 'secret', now), null, 'tolérance d’horloge');
+  assert.equal(verifyIdentityJwt(signJwt(p, 'secret', { alg: 'none' }), 'secret', now), null, 'alg none');
+  assert.equal(verifyIdentityJwt(signJwt({ ...p, sub: '' }, 'secret'), 'secret', now), null, 'sans sujet');
+  const t = signJwt(p, 'secret').split('.');
+  const forged = [t[0], Buffer.from(JSON.stringify({ ...p, sub: 'admin' })).toString('base64url'), t[2]].join('.');
+  assert.equal(verifyIdentityJwt(forged, 'secret', now), null, 'contenu modifié');
+  assert.equal(verifyIdentityJwt('pas.un.jeton', 'secret', now), null);
+  assert.equal(verifyIdentityJwt(signJwt(p, 'secret'), '', now), null, 'pas de secret configuré');
+});
+
+test('assistant : code de confirmation lié aux paramètres, à usage unique', () => {
+  const { code } = issueConfirmation('cle-a');
+  assert.match(code, /^[A-Z0-9]{6}$/);
+  assert.equal(checkConfirmation(code, 'cle-b').status, 'invalid', 'autres paramètres');
+  assert.equal(checkConfirmation(code.toLowerCase(), 'cle-a').status, 'ok', 'casse indifférente');
+  assert.equal(checkConfirmation(code, 'cle-a').status, 'invalid', 'déjà servi');
+  assert.equal(checkConfirmation('ZZZZZZ', 'cle-a').status, 'invalid');
+});
+
+test('assistant : confirmation seulement après une réponse de la personne', () => {
+  const { code } = issueConfirmation('cle-t', 'message-1');
+  const same = checkConfirmation(code, 'cle-t', 'message-1');
+  assert.equal(same.status, 'wait', 'même message que l’aperçu : le modèle enchaîne seul');
+  assert.equal(same.code, code, 'le code reste valable');
+  assert.equal(checkConfirmation(code, 'cle-t', 'message-2').status, 'ok', 'message suivant');
+  const loose = issueConfirmation('cle-u');
+  assert.equal(checkConfirmation(loose.code, 'cle-u', 'message-9').status, 'ok', 'message inconnu à l’aperçu : accepté');
+});
+
+test('assistant : réponses raccourcies, avec ce qui manque', () => {
+  const big = { entries: Array.from({ length: 80 }, (_, k) => ({ id: k, title: `Entrée ${k}`, excerpt: 'x'.repeat(150) })), next_offset: 80 };
+  const fit = fitResponse(big, 4000);
+  assert.ok(JSON.stringify(fit).length <= 4600, JSON.stringify(fit).length);
+  assert.ok(fit.entries.length < 80 && fit.entries[0].id === 0, 'les premiers gardés');
+  assert.match(fit.truncated.fields[0], /entries : liste de 80 éléments/);
+  assert.match(fit.truncated.note, /limit|offset/);
+  const text = fitResponse({ markdown: 'y'.repeat(20000) }, 5000);
+  assert.ok(text.markdown.length < 6000 && text.markdown.endsWith('[…]'));
+  const small = { a: 1 };
+  assert.equal(fitResponse(small, 4000), small, 'déjà courte : inchangée');
+});
+
+test('assistant : aucune séquence écrite par une IA', async () => {
+  assert.equal(sequenceIn('Amorce sens : ATGCGTACGTTAGCATGCAA'), 'ATGCGTACGTTAGCATGCAA');
+  assert.ok(sequenceIn('1 atgcatgcat gcatgcatgc atgcat'), 'blocs de 10, comme GenBank');
+  assert.ok(sequenceIn({ samples: [{ content: 'MKVLAAGIVGLLLAAQPAMAQVQLVESGGG' }] }), 'protéine, dans un objet');
+  for (const text of ['Plasmide SEQ-0042, digestion EcoRI (GAATTC) 1 h à 37 °C, TAE 1X.', 'anticonstitutionnellement',
+    'https://www.ncbi.nlm.nih.gov/nuccore/NM_000546', '7c9e6679-7425-40de-944b-e07fc1f90ae7']) {
+    assert.equal(sequenceIn(text), null, text);
+  }
+  const ctx = { user: { id: 'u' }, token: { id: 'assistant:x', kind: 'assistant', scope: 'write', name: 'IA' }, profile: 'assistant', twoPhase: true };
+  await assert.rejects(
+    invoke('append_to_entry', { entry_id: crypto.randomUUID(), content_markdown: 'Amorce : ATGCGTACGTTAGCATGCAAGG' }, ctx),
+    (err) => err.status === 422 && /séquence/.test(err.message) && /Rien n’a été enregistré/.test(err.message),
+  );
+});
+
+test('assistant : le verrouillage reste un geste de la personne', async () => {
+  assert.ok(!listOperations({ profile: 'assistant' }).some((op) => op.humanOnly), 'absent du profil');
+  const ctx = { user: { id: 'u' }, token: { id: 'assistant:x', kind: 'assistant', scope: 'write', name: 'IA' }, profile: 'full', twoPhase: true };
+  await assert.rejects(invoke('lock_entry', { entry_id: crypto.randomUUID(), confirm: true }, ctx), (err) => err.status === 403 && /irréversible/.test(err.message));
+});
+
+test('assistant : longue entrée en parties', () => {
+  const t = Array.from({ length: 40 }, (_, k) => `Paragraphe ${k} ${'z'.repeat(300)}`).join('\n\n');
+  const parts = splitParts(t, 2000);
+  assert.ok(parts.length > 5 && parts.every((p) => p.length <= 2000));
+  assert.equal(parts.join(''), t, 'rien de perdu');
+  assert.ok(parts[1].startsWith('Paragraphe'), 'coupé entre deux paragraphes');
+  assert.deepEqual(splitParts('', 1000), ['']);
+});
+
+test('assistant : description OpenAPI de son profil', () => {
+  const doc = openapiDocument('https://paillasse.labo.fr', { profile: 'assistant', prefix: 'paillasse_' });
+  assert.deepEqual(doc.servers, [{ url: 'https://paillasse.labo.fr/api/v1/assistant' }]);
+  const ops = Object.values(doc.paths).flatMap((p) => Object.values(p));
+  assert.equal(ops.length, 26);
+  assert.ok(ops.every((o) => o.operationId.startsWith('paillasse_')));
+  assert.ok(!doc.paths['/documents'], 'pas d’export en bloc');
+  const store = doc.paths['/samples'].post;
+  const props = store.requestBody.content['application/json'].schema.properties;
+  assert.ok(props.confirmation && !props.dry_run, 'deux temps, pas d’essai à sec direct');
+  assert.match(store.description, /paillasse_get_storage_unit/, 'renvois préfixés');
+  const full = openapiDocument('', {});
+  assert.ok(full.paths['/samples'].post.requestBody.content['application/json'].schema.properties.dry_run, 'API complète : dry_run');
+  assert.ok(!full.paths['/samples'].post.requestBody.content['application/json'].schema.properties.confirmation);
+});
+
+test('essai à sec : tout est annulé', { skip: !available && 'PostgreSQL absent' }, async () => {
+  const key = `essai-a-sec-${Date.now()}`;
+  const seen = await dryRun(async () => {
+    assert.equal(inDryRun(), true);
+    await query("INSERT INTO app_settings (key, value) VALUES ($1, '{}')", [key]);
+    const { tx } = await import('../src/db.js');
+    await tx(async (c) => { await c.query("UPDATE app_settings SET value = '{\"a\":1}' WHERE key = $1", [key]); });
+    return (await query('SELECT value FROM app_settings WHERE key = $1', [key])).rows[0]?.value;
+  });
+  assert.deepEqual(seen, { a: 1 }, 'visible pendant l’essai, transactions imbriquées comprises');
+  assert.equal(inDryRun(), false);
+  const { rows } = await query('SELECT 1 FROM app_settings WHERE key = $1', [key]);
+  assert.equal(rows.length, 0, 'rien d’enregistré');
+  await assert.rejects(dryRun(async () => { throw new Error('échec'); }), /échec/);
 });

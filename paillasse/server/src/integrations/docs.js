@@ -34,8 +34,12 @@ export function llmsText(origin = '') {
       + 'lecture et écriture. À envoyer dans l’en-tête `Authorization: Bearer pai_…`. Il agit avec les droits du compte sur ses '
       + 'projets, jamais avec les droits d’administration.',
     `- [Serveur MCP](${origin}/mcp) : transport Streamable HTTP, sans état (POST JSON-RPC 2.0). Outils, ressources `
-      + '(paillasse://entries/{id}…) et consignes prêtes à l’emploi. `?profile=essential` : une douzaine d’outils seulement '
-      + '(petits modèles) ; `?tools=search,get_entry` : liste choisie.',
+      + '(paillasse://entries/{id}…) et consignes prêtes à l’emploi. `?profile=assistant` : une sélection d’outils pour une IA '
+      + 'de labo à petite fenêtre de contexte (réponses courtes, écriture en deux temps) ; `?tools=search,get_entry` : liste choisie.',
+    `- [API de l’assistant](${origin}/api/v1/assistant/openapi.json) : la même sélection en serveur d’outils OpenAPI (base `
+      + '`/api/v1/assistant`, noms préfixés `paillasse_`), pour l’assistant IA du labo (Open WebUI). Il peut agir au nom de la '
+      + 'personne qui lui parle (en-tête signé ou session vérifiée), une fois son compte relié par un code ; toute écriture rend '
+      + `d’abord un aperçu, puis s’enregistre avec le code de confirmation. [Consigne à ajouter à son prompt](${origin}/api/v1/assistant/prompt).`,
     `- [Pont MCP stdio](${origin}/integrations/paillasse-mcp.mjs) pour les clients qui ne lancent que des serveurs locaux : `
       + '`PAILLASSE_URL=… PAILLASSE_TOKEN=pai_… node paillasse-mcp.mjs` (Node 18 ou plus, sans dépendance).',
     `- [Description OpenAPI 3.1](${origin}/api/v1/openapi.json) de l’API REST (version ${API_VERSION}), utilisable comme `

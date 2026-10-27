@@ -691,7 +691,7 @@ const REMOVED_LABELS = {
   entries: 'entrée(s)', versions: 'version(s) figée(s)', attachments: 'pièce(s) jointe(s)', projects: 'projet(s)', notes: 'post-it',
   datasets: 'jeu(x) de données', sequences: 'séquence(s)', files: 'fichier(s) d’origine', units: 'contenant(s)', samples: 'tube(s)',
   reagents: 'produit(s)', ladders: 'marqueur(s)', templates: 'modèle(s)', templates_retired: 'modèle(s) de base retiré(s)',
-  api_tokens: 'jeton(s) d’accès', webhooks: 'webhook(s)',
+  api_tokens: 'jeton(s) d’accès', webhooks: 'webhook(s)', assistant_links: 'liaison(s) avec l’assistant IA',
 };
 
 async function safetyCopy(job) {

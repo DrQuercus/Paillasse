@@ -36,9 +36,12 @@ function coerce(type, value) {
     case 'array': {
       if (Array.isArray(value)) return value;
       if (typeof value === 'string') {
-        const s = value.trim();
-        if (s.startsWith('[')) { try { return JSON.parse(s); } catch { /* liste séparée par des virgules */ } }
-        return s === '' ? [] : s.split(',').map((x) => x.trim()).filter(Boolean);
+        let s = value.trim();
+        if (s.startsWith('[') && s.endsWith(']')) {
+          try { return JSON.parse(s); } catch { /* peut-être une liste à la Python : ['a', 'b'] */ }
+          try { return JSON.parse(s.replace(/'/g, '"')); } catch { s = s.slice(1, -1); }
+        }
+        return s === '' ? [] : s.split(',').map((x) => x.trim().replace(/^(['"])(.*)\1$/, '$2')).filter(Boolean);
       }
       return [value];
     }
